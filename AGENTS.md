@@ -1,6 +1,6 @@
 # 天气境 WeatherScape: project guidance
 
-A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.0.
+A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.1.
 Design contract: spatial-app-factory `apps/weather-scape/design-package.json` (v1.0, gate B passed 2026-11-12 with all
 defaults: turn the brass ring through 48 h + tap cloud / tree / house; Open-Meteo, CC BY, non-commercial; Shared Space,
 archetype A, 生产力; stone house A + birch + island A + lamp, procedural vane; no photos / immersive env (v2); 48 h only;
@@ -19,6 +19,12 @@ sound pool, board-input template); weather data, ring, scene and pages are new.
 - **Control window** (`WeatherScapeControl`, Planar 560 x 620 dp fixed, `Placement.right(volume)`): native SpatialUI
   `TabBar`, three pages 天气 / 城市 / 设置; first run shows the how-to card on the weather page. No page scrolls.
   [退出应用] closes both containers, removes the tasks and ends the process. The app never reads the head pose.
+
+## v0.1.1 (QA #1 rework)
+Smoke yields to every ask tag (`domain/Smoke.kt`); 16 dp between side-by-side buttons; the how-to card teaches both the
+ring and the 48 h strip tap (D53, Shared Space kept); search: Chinese characters search in Chinese, hits ranked exact
+name > capital / seat > population, English names filled via /v1/get; fog = soft wisp rings; snow flakes carry a white
+emissive; cities page area 340 dp (no-result / offline = compact note + your cities). Source: github.com/kejing-dev/WeatherScape.
 
 ## Code
 | Path | What |
