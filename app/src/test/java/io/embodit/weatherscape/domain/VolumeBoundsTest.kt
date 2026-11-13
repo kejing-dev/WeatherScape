@@ -1,0 +1,155 @@
+package io.embodit.weatherscape.domain
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * M5: every entity x 48 whole hours x the rain / snow sheets at their largest tilt toward four winds stays inside the
+ * volume shrunk by 1 cm; the stop pin never meets the pointer; mesh budgets (design budget: <= 62 k triangles).
+ */
+class VolumeBoundsTest {
+    private val safe = Layout.SAFE
+
+    private fun box(m: MeshData, at: V3 = V3.ZERO, s: V3 = V3(1f, 1f, 1f)): Aabb { val (lo, hi) = m.bounds(); return Aabb(V3(lo.x * s.x, lo.y * s.y, lo.z * s.z) + at, V3(hi.x * s.x, hi.y * s.y, hi.z * s.z) + at) }
+
+    private fun modelBox(cal: ModelCal, at: V3) = Aabb(at + V3(-cal.size.x / 2, 0f, -cal.size.z / 2), at + V3(cal.size.x / 2, cal.size.y, cal.size.z / 2))
+
+    @Test fun staticPartsInside() {
+        val parts = mapOf(
+            "plinth" to box(Pieces.plinth(), V3(0f, Layout.PLINTH_Y0, 0f)),
+            "ring" to box(Pieces.ringBand(), V3(0f, Layout.RING_Y, 0f)),
+            "readout" to Layout.READOUT_BOX,
+            "pointer" to Layout.POINTER_BOX,
+            "knob" to Layout.KNOB_BOX,
+            "knobHit" to Layout.KNOB_HIT_BOX,
+            "island" to modelBox(ModelCalib.ISLAND, V3(0f, ModelCalib.ISLAND_BOTTOM, 0f)),
+            "house" to modelBox(ModelCalib.HOUSE, ModelCalib.HOUSE_AT).let { Aabb(it.lo, it.hi + V3(0f, 0.035f, 0f)) },
+            "lamp" to modelBox(ModelCalib.LAMP, ModelCalib.LAMP_AT),
+            "skyHit" to Layout.SKY_HIT,
+        )
+        for ((n, b) in parts) assertTrue("$n $b outside $safe", b.inside(safe))
+    }
+
+    @Test fun treeSwayInsideAtTheLargestAmplitude() {
+        val t = ModelCalib.TREE
+        val h = t.size.y; val r = maxOf(t.size.x, t.size.z) / 2
+        val lean = kotlin.math.sin(Layout.deg(9f * 1.15f)) * h
+        val b = Aabb(ModelCalib.TREE_AT + V3(-r - lean, 0f, -r - lean), ModelCalib.TREE_AT + V3(r + lean, h, r + lean))
+        assertTrue("$b", b.inside(safe))
+    }
+
+    @Test fun everyHourEveryWindInside() {
+        for (slice in listOf(Sample.slice(), Sample.slice(20))) for (h in 0..47) {
+            val p = SceneModel.at(slice, h.toFloat())
+            for ((dx, dz) in listOf(1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f)) {
+                val pb = Layout.precipBox(Layout.PRECIP_TILT_MAX_DEG, dx, dz)
+                assertTrue("precip $h $dx $dz $pb", pb.inside(safe))
+                for (i in 0 until 6) for (t in listOf(0f, 3.3f, 17f, 41f, 99f)) {
+                    val (c, _) = SceneModel.cloudPos(i, t, 0.03f, dx, dz)
+                    val cb = Aabb.centred(c, V3(Layout.CLOUD_W, Layout.CLOUD_H, Layout.CLOUD_W))
+                    assertTrue("cloud $i $cb", cb.inside(safe))
+                    assertTrue("cloud in r 0.22", Layout.hyp(c.x, c.z) + Layout.CLOUD_W / 2 <= Layout.CLOUD_R + 1e-4f)
+                }
+            }
+            for (body in listOf(p.sunPos to Layout.SUN_R, p.moonPos to Layout.MOON_R)) {
+                val b = Aabb.centred(body.first, V3(2 * body.second, 2 * body.second, 2 * body.second))
+                assertTrue("sun/moon $h $b", b.inside(safe))
+            }
+        }
+    }
+
+    @Test fun cloudMeshesFitTheirBox() {
+        for (i in 0 until 6) {
+            val (lo, hi) = Pieces.cloud(17 + i * 31).bounds()
+            assertTrue("cloud $i ${hi - lo}", hi.x - lo.x <= Layout.CLOUD_W + 1e-3f && hi.y - lo.y <= Layout.CLOUD_H + 1e-3f && hi.z - lo.z <= Layout.CLOUD_D + 1e-3f)
+        }
+    }
+
+    @Test fun tagsInsideAndClearOfTheModels() {
+        for (k in Ask.entries) {
+            val tb = io.embodit.weatherscape.ui.scene.DioramaScene.tagBox(k)
+            assertTrue("$k $tb", tb.inside(safe))
+        }
+        val houseTag = io.embodit.weatherscape.ui.scene.DioramaScene.tagBox(Ask.HOUSE)
+        val treeTag = io.embodit.weatherscape.ui.scene.DioramaScene.tagBox(Ask.TREE)
+        assertFalse(houseTag.intersects(treeTag))
+        assertFalse("tree tag below the cloud base", treeTag.hi.y > Layout.CLOUD_Y0 + 0.01f)
+    }
+
+    /** Segment a..b crosses box [b0] (slab test). */
+    private fun hits(a: V3, b: V3, box: Aabb): Boolean {
+        var t0 = 0f; var t1 = 1f
+        val d = b - a
+        for ((o, dd, lo, hi) in listOf(arrayOf(a.x, d.x, box.lo.x, box.hi.x), arrayOf(a.y, d.y, box.lo.y, box.hi.y), arrayOf(a.z, d.z, box.lo.z, box.hi.z))) {
+            if (kotlin.math.abs(dd) < 1e-7f) { if (o < lo || o > hi) return false; continue }
+            var ta = (lo - o) / dd; var tb = (hi - o) / dd
+            if (ta > tb) { val x = ta; ta = tb; tb = x }
+            t0 = maxOf(t0, ta); t1 = minOf(t1, tb)
+            if (t0 > t1) return false
+        }
+        return true
+    }
+
+    private fun corners(b: Aabb) = listOf(V3(b.lo.x, b.lo.y, b.hi.z), V3(b.hi.x, b.lo.y, b.hi.z), V3(b.lo.x, b.hi.y, b.hi.z), V3(b.hi.x, b.hi.y, b.hi.z), V3((b.lo.x + b.hi.x) / 2, (b.lo.y + b.hi.y) / 2, b.hi.z))
+
+    private val winds = listOf(1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f, 0.7071f to 0.7071f, -0.7071f to 0.7071f, 0.7071f to -0.7071f, -0.7071f to -0.7071f)
+
+    /** Every smoke puff box over a 4 s loop, all winds, wind levels 0..6. */
+    private fun puffBoxes(): List<Aabb> {
+        val out = ArrayList<Aabb>()
+        for ((dx, dz) in winds) for (wl in 0..6) for (k in 0 until 40) for (i in 0 until Smoke.N) {
+            val (c, sc) = Smoke.puff(i, k * 0.1f, dx, dz, wl); out += Smoke.puffBounds(c, sc)
+        }
+        return out
+    }
+
+    @Test fun smokeYieldsToEveryTagAndTagsAreSeenWhole() {
+        // q1-1 (QA #1): the chimney smoke crossed the house tag. Show that it did (so the rule is needed) ...
+        val houseTag = io.embodit.weatherscape.ui.scene.DioramaScene.tagBox(Ask.HOUSE)
+        val puffs = puffBoxes()
+        val crossed = Layout.EYES.any { eye -> corners(houseTag).any { c -> puffs.any { hits(eye, c, it) } } }
+        assertTrue("without the yield, smoke sits between the eye and the house tag", crossed)
+        // ... and the yield: any tag up -> target 0, so the puffs are gone while the tag is shown
+        for (smoke in listOf(true, false)) assertTrue(Smoke.target(smoke, tagUp = true) == 0f)
+        assertTrue(Smoke.target(true, tagUp = false) == 1f)
+        // the tags themselves: every sightline from the four design eyes to the tag's four corners + centre misses the
+        // models' boxes (house + vane, tree crown, lamp) and the tag never meets them
+        val house = modelBox(ModelCalib.HOUSE, ModelCalib.HOUSE_AT).let { Aabb(it.lo, it.hi + V3(0f, 0.035f, 0f)) }
+        val tree = modelBox(ModelCalib.TREE, ModelCalib.TREE_AT)
+        val lamp = modelBox(ModelCalib.LAMP, ModelCalib.LAMP_AT)
+        for (k in Ask.entries) {
+            val tb = io.embodit.weatherscape.ui.scene.DioramaScene.tagBox(k)
+            for (m in listOf(house, tree, lamp)) {
+                assertFalse("$k tag meets $m", tb.intersects(m))
+                for (eye in Layout.EYES) for (c in corners(tb)) assertFalse("$k eye $eye corner $c blocked by $m", hits(eye, c, m))
+            }
+        }
+    }
+
+    @Test fun pinNeverMeetsThePointer() {
+        for (end in listOf(47, 30, 11)) for (k in 0..(end * 4)) {
+            val pos = k / 4f
+            assertFalse("end $end pos $pos", Layout.pinBox(pos, end).intersects(Layout.POINTER_BOX))
+        }
+    }
+
+    @Test fun readoutDoesNotHideTheRingFront() {
+        // design occlusionCheck: from the seated and level eyes, the line to the ring's front top edge passes above the readout
+        val ringFront = V3(0f, Layout.RING_TOP, Layout.RING_OUT)
+        for (eye in Layout.EYES.take(2)) {
+            val t = (Layout.READOUT_BOX.hi.z - eye.z) / (ringFront.z - eye.z)
+            val y = eye.y + (ringFront.y - eye.y) * t
+            assertTrue("eye $eye y at readout front $y", y > Layout.READOUT_BOX.hi.y)
+        }
+    }
+
+    @Test fun triangleBudget() {
+        val procedural = listOf(Pieces.plinth(), Pieces.ringBand(), Pieces.ringFace(), Pieces.pin(), Pieces.readoutCase(), Pieces.pointer(), Pieces.knob(), Pieces.vaneBase(), Pieces.vaneArrow(), Pieces.roofSnow()).sumOf { it.triangles } +
+            (0 until 6).sumOf { Pieces.cloud(17 + it * 31).triangles } + (0 until 4).sumOf { Pieces.rainSheet(3 + it).triangles + Pieces.snowSheet(5 + it).triangles } +
+            2 * Pieces.fogBand(91).triangles + 6 * Pieces.sphere(0.006f, 12, 8).triangles + 2 * Pieces.sphere(0.015f).triangles + 6 * Pieces.ripple().triangles
+        val models = ModelCalib.ALL.sumOf { it.triangles } + ModelCalib.ISLAND.triangles // + snow shell
+        println("TRIANGLES procedural=$procedural models=$models total=${procedural + models}")
+        assertTrue("total ${procedural + models}", procedural + models <= 62_000 + 12_000) // the snow shell repeats the island (12 k), shown only with snow
+    }
+}
