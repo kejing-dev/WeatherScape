@@ -1,6 +1,6 @@
 # 天气境 WeatherScape: project guidance
 
-A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.2.
+A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.3.
 Design contract: spatial-app-factory `apps/weather-scape/design-package.json` (v1.0, gate B passed 2026-11-12 with all
 defaults: turn the brass ring through 48 h + tap cloud / tree / house; Open-Meteo, CC BY, non-commercial; Shared Space,
 archetype A, 生产力; stone house A + birch + island A + lamp, procedural vane; no photos / immersive env (v2); 48 h only;
@@ -8,7 +8,7 @@ window offset 3–5° accepted, DV4). Skeleton from the factory's puzzle-box (Cl
 sound pool, board-input template); weather data, ring, scene and pages are new.
 
 ## Surfaces
-- **Diorama volume** (default container `WeatherScapeVolume`, Volumetric 0.66 x 0.54 x 0.68 m, fixed scale, gravity
+- **Diorama volume** (default container `WeatherScapeVolume`, Volumetric 0.94 x 0.77 x 0.97 m (v0.1.3; layout units 0.66 x 0.54 x 0.68 shown x `Layout.SCALE` 1.42), fixed scale, gravity
   aligned, uniform resize). Walnut plinth Ø 0.40, a flat brass time ring (48 h on 330°, a stop pin in the 30° gap,
   engraved hour ticks / local clock hours / day names, all a runtime texture), a brass readout (display only, two lines)
   with its pointer, the "面板 / Panel" knob; Tripo island + stone house + birch + lamp (calibrated in
@@ -19,6 +19,19 @@ sound pool, board-input template); weather data, ring, scene and pages are new.
 - **Control window** (`WeatherScapeControl`, Planar 760 x 660 dp fixed (v0.1.2), `Placement.right(volume)`): native SpatialUI
   `TabBar`, three pages 天气 / 城市 / 设置; first run shows the how-to card on the weather page. No page scrolls.
   [退出应用] closes both containers, removes the tasks and ends the process. The app never reads the head pose.
+
+## v0.1.3 (QA #3 rework)
+- q3-1 search: `OpenMeteo.parseSearchMany` ranks big places (PPLC / PPLA / >= 1 M people) first, then exact names against
+  every spelling, feature rank, population, API order (v0.1.1 put "exact name" first and compared the language=zh name
+  "巴黎" with "Paris"). A Chinese query also asks its traditional spelling (`Hanzi`, GeoNames lists 東京 / 倫敦 / 紐約) and
+  English aliases (`OpenMeteo.aliasesOf`: the 24 default cities + ~40 more); zh names are shown simplified. Saved real
+  answers in `test/resources/geo`, `SearchRankTest` (zh / en UI x Paris / London / 东京 / 北京).
+- q3-2 rain / snow give way to tags: `domain/PrecipYield.kt`; while a tag is up the scene swaps in holed sheets built
+  without the drops / flakes that can pass in front of the tag (`Pieces.rainSheet(seed, skip)`), log `PRECIP yields`.
+- q3-3 D54: the scene root is scaled x 1.42, volume 0.94 x 0.77 x 0.97 m; ring 25.6°, ring + 3D keys 34.8° at 1.75 m.
+  Ring drags divide the pointer metres by `Layout.SCALE`. `tools/ws.sh shot` panel crop moved (3320,1080,4960,1900).
+- q3-4 D13: the 3D ◀ ▶ word is 92 px (min 72) on the 256 px face (was 44): >= 0.5° from every design eye (`Rework3Test`).
+- K2 real minus sign (`Units.tempText` "−1°"); K5 the window ◀ ▶ a11y name is the icon's only ("往后 1 小时").
 
 ## v0.1.2 (gate B C1-C5 + user 11-13 on the headset)
 White clouds / smoke / fog / flakes: `domain/Controls.kt WhiteLook` (emissive base >= 40 % of the colour, light greys only;

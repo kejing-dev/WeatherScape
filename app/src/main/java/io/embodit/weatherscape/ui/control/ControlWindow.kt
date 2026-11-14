@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -236,7 +237,8 @@ private fun StepButton(d: Int, enabled: Boolean, graph: Graph, modifier: Modifie
         val label = stringResource(R.string.step_hour)
         if (d < 0) Icon(painter = painterResource(R.drawable.ic_chev_left), contentDescription = stringResource(R.string.step_back_desc), modifier = Modifier.size(30.dp), tint = fg)
         // design-style: inherited-content-color Button
-        Txt(label, if (d < 0) "weather/step-back" else "weather/step-fwd", style = PicoTheme.typography.titleMedium, color = fg)
+        // K5 (QA #3): the icon carries the whole name ("往后 1 小时"); the visible word stays out of the a11y name
+        Txt(label, if (d < 0) "weather/step-back" else "weather/step-fwd", style = PicoTheme.typography.titleMedium, color = fg, modifier = Modifier.clearAndSetSemantics {})
         if (d > 0) Icon(painter = painterResource(R.drawable.ic_chev_right), contentDescription = stringResource(R.string.step_fwd_desc), modifier = Modifier.size(30.dp), tint = fg)
     }
 }

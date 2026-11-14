@@ -149,7 +149,7 @@ object Pieces {
         return Shapes.merge(parts)
     }
 
-    private fun strands(seed: Int, n: Int): List<Pair<Float, Float>> {
+    fun strands(seed: Int, n: Int): List<Pair<Float, Float>> {
         val rnd = Random(seed)
         return (0 until n).map {
             val r = kotlin.math.sqrt(rnd.nextFloat()) * (Layout.PRECIP_R - 0.004f)
@@ -162,14 +162,14 @@ object Pieces {
      * A rain sheet: 16 strands x 5 drops = 80 opaque streaks 2 mm x 16 mm on a 5 cm lattice, from y 0 to the column height
      * + one step (the entity slides it down by (t x 0.6 m/s) mod 5 cm, so it falls without a seam). Origin = column bottom.
      */
-    fun rainSheet(seed: Int): MeshData {
+    fun rainSheet(seed: Int, skip: ((Float, Float, Float) -> Boolean)? = null): MeshData {
         val h = Layout.PRECIP_Y1 - Layout.PRECIP_Y0 + Layout.RAIN_STEP
         val b = MeshBuilder()
         val rnd = Random(seed * 7 + 1)
-        for ((x, z) in strands(seed, 16)) {
-            val phase = rnd.nextFloat() * Layout.RAIN_STEP
-            var y = phase
+        for ((x, z) in strands(seed, RAIN_STRANDS)) {
+            var y = rnd.nextFloat() * Layout.RAIN_STEP
             while (y + 0.016f <= h) {
+                if (skip?.invoke(x, y, z) == true) { y += Layout.RAIN_STEP; continue } // q3-2: this drop makes way for a tag
                 for (k in 0 until 2) {
                     val a = if (k == 0) 0f else (PI / 2).toFloat()
                     val dx = 0.001f * cos(a); val dz = 0.001f * sin(a)
@@ -181,21 +181,27 @@ object Pieces {
                 y += Layout.RAIN_STEP
             }
         }
-        return b.build()
+        return b.build().let { if (it.vertexCount == 0) Shapes.sphere(V3.ZERO, 0.0001f, 4, 3) else it } // never an empty mesh
     }
+    const val RAIN_STRANDS = 16
+    const val SNOW_STRANDS = 12
+    fun rainStrands(seed: Int) = strands(seed, RAIN_STRANDS)
+    fun snowStrands(seed: Int) = strands(seed + 50, SNOW_STRANDS)
 
     /** A snow sheet: 12 strands x 5 = 60 white octahedra Ø 4 mm on the same lattice idea (0.08 m/s). */
-    fun snowSheet(seed: Int): MeshData {
+    fun snowSheet(seed: Int, skip: ((Float, Float, Float) -> Boolean)? = null): MeshData {
         val h = Layout.PRECIP_Y1 - Layout.PRECIP_Y0 + Layout.SNOW_STEP
         val parts = ArrayList<MeshData>()
         val rnd = Random(seed * 13 + 5)
-        for ((x, z) in strands(seed + 50, 12)) {
+        for ((x, z) in strands(seed + 50, SNOW_STRANDS)) {
             var y = rnd.nextFloat() * Layout.SNOW_STEP
             while (y + 0.004f <= h) {
-                parts += octa(V3(x + (rnd.nextFloat() - 0.5f) * 0.01f, y, z + (rnd.nextFloat() - 0.5f) * 0.01f), 0.002f)
+                val fx = x + (rnd.nextFloat() - 0.5f) * 0.01f; val fz = z + (rnd.nextFloat() - 0.5f) * 0.01f
+                if (skip?.invoke(fx, y, fz) != true) parts += octa(V3(fx, y, fz), 0.002f) // q3-2: flakes in front of a tag make way
                 y += Layout.SNOW_STEP
             }
         }
+        if (parts.isEmpty()) parts += octa(V3.ZERO, 0.0001f) // never an empty mesh
         return Shapes.merge(parts)
     }
 

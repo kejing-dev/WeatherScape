@@ -46,7 +46,7 @@
              -->
             <meta-data
                 android:name="pico.spatial.windowcontainer.defaultsize"
-                android:value="0.66x0.54x0.68" />
+                android:value="0.94x0.77x0.97" />
 
             <!-- Unit of default size for the WindowContainer
                  "dp" — uses density-independent pixels (default)

@@ -81,7 +81,8 @@ enum class TempUnit { C, F }
 
 object Units {
     fun temp(c: Float, u: TempUnit): Int = if (u == TempUnit.F) (c * 9f / 5f + 32f).roundToInt() else c.roundToInt()
-    fun tempText(c: Float, u: TempUnit): String = "${temp(c, u)}°"
+    /** v0.1.3 (QA #3 K2): below zero with a real minus sign U+2212 ("−1°"), an ASCII "-" read like "--1°" from afar. */
+    fun tempText(c: Float, u: TempUnit): String = temp(c, u).let { if (it < 0) "\u2212${-it}°" else "$it°" }
     fun wind(kmh: Float, u: TempUnit): Int = if (u == TempUnit.F) (kmh * 0.621371f).roundToInt() else kmh.roundToInt()
     fun windUnit(u: TempUnit): String = if (u == TempUnit.F) "mph" else "km/h"
 }

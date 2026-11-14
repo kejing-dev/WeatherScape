@@ -22,6 +22,7 @@ import com.pico.spatial.ui.geometry.Offset3D
 import com.pico.spatial.ui.platform.containers.LocalSpatialNavigator
 import io.embodit.weatherscape.R
 import io.embodit.weatherscape.domain.Ask
+import io.embodit.weatherscape.domain.Layout
 import io.embodit.weatherscape.domain.Texts
 import io.embodit.weatherscape.domain.WeatherFlow
 import io.embodit.weatherscape.platform.Graph
@@ -184,7 +185,7 @@ internal class VolumeListener(private val graph: Graph, private val scene: Diora
     /** N1: the template reports volume axes (+X right); only the horizontal x travel turns the ring (N2: where you grab does not matter). */
     override fun onDragMove(totalM: Offset3M) {
         if (!dragging) return
-        graph.flow.ringDragMove(totalM.x)
+        graph.flow.ringDragMove(totalM.x / Layout.SCALE) // world metres -> layout metres (q3-3 root scale)
         if (BoardInputLog.verbosePointer && SystemClock.uptimeMillis() % 10 == 0L) BoardInputLog.write(TAG, "RINGMOVE total=(%.3f, %.3f, %.3f)".format(totalM.x, totalM.y, totalM.z))
     }
 

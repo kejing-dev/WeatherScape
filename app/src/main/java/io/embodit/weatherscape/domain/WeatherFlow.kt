@@ -480,9 +480,13 @@ class WeatherFlow(
                     withContext(io) {
                         // "中文英文都行": Chinese characters are looked up in Chinese (v0.1.1: "西安" in English UI found only
                         // Xi'ancun), anything else in the UI language; nothing found -> the other language once
+                        // v0.1.3 (q3-1 / K1): a Chinese query also asks its traditional spelling and English aliases
+                        // (GeoNames lists 東京 / 倫敦, not 东京 / 伦敦); the first request is required, the rest best effort
                         val sz = OpenMeteo.searchZh(query, z)
                         var lang = sz
-                        var list = OpenMeteo.parseSearch(source.search(query, sz), sz, query)
+                        val qs = OpenMeteo.searchQueries(query, z)
+                        val texts = listOf(source.search(qs.first(), sz)) + qs.drop(1).mapNotNull { q -> runCatching { source.search(q, sz) }.getOrNull() }
+                        var list = OpenMeteo.parseSearchMany(texts, sz, query)
                         if (list.isEmpty()) { lang = !sz; list = OpenMeteo.parseSearch(source.search(query, !sz), !sz, query) }
                         // results found in the other language: fill the UI language's names so the rows read in it
                         if (lang != z) list = list.map { c -> runCatching { OpenMeteo.mergeNames(c, source.names(c.id, z), z) }.getOrDefault(c) }

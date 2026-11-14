@@ -21,9 +21,17 @@ data class Aabb(val lo: V3, val hi: V3) {
 
 /**
  * Every metre of the volume (design container.volume.math + spatialLayout). Origin = volume centre, +X right (west),
- * +Y up, +Z toward the user (north). The volume is 0.66 x 0.54 x 0.68 m.
+ * +Y up, +Z toward the user (north). Layout units: the design volume 0.66 x 0.54 x 0.68.
+ *
+ * v0.1.3 (QA #3 q3-3, profile D54): the whole diorama is shown x [SCALE] (the scene root's scale) in a volume of
+ * [VOLUME_M] metres (manifest), so the ring spans >= 25° from the design eye (1.75 m). Every number below stays in
+ * layout units; world metres = layout x SCALE.
  */
 object Layout {
+    /** Scene root scale (q3-3): 0.66 -> 0.94 m wide. Ring Ø 0.56 x 1.42 = 0.795 m -> 25.6° at 1.75 m. */
+    const val SCALE = 1.42f
+    /** The manifest volume size in metres (width, height, depth) = design volume x SCALE, rounded up to the cm. */
+    val VOLUME_M = floatArrayOf(0.94f, 0.77f, 0.97f)
     val VOLUME = Aabb(V3(-0.33f, -0.27f, -0.34f), V3(0.33f, 0.27f, 0.34f))
     /** Everything stays inside the volume shrunk by 1 cm (M5). */
     val SAFE = VOLUME.grow(-0.01f)
@@ -74,7 +82,12 @@ object Layout {
     val STEP_BACK_C = V3(-0.28f, -0.222f, 0.24f)
     val STEP_FWD_C = V3(0.28f, -0.222f, 0.24f)
     /** Yaw of a step button so its face points at the seated design eye (0, 0.35, 1.75). */
-    fun stepYaw(c: V3): Float = kotlin.math.atan2(-c.x, 1.75f - c.z)
+    /** The engraved face (Pieces.disc radius) and its 256 px texture: the "1 小时 / 1 hr" word (q3-4, D13). */
+    const val STEP_FACE_R = 0.0235f
+    const val STEP_TEX_PX = 256
+    const val STEP_LABEL_PX = 92f
+    const val STEP_LABEL_MIN_PX = 72f
+    fun stepYaw(c: V3): Float = kotlin.math.atan2(-c.x, 1.75f / SCALE - c.z) // the eye in layout units (root x SCALE)
     /** Conservative boxes (the disc's bounding sphere / the collider's): bounds, spacing and pick tests. */
     fun stepBox(c: V3) = Aabb.centred(c, V3(2 * STEP_R + 0.004f, 2 * STEP_R + 0.004f, 2 * STEP_R + 0.004f))
     fun stepHitBox(c: V3) = Aabb.centred(c, V3(STEP_HIT + 0.012f, STEP_HIT, STEP_HIT + 0.012f))

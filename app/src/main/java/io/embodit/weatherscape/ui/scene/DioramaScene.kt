@@ -32,6 +32,7 @@ import io.embodit.weatherscape.domain.Q4
 import io.embodit.weatherscape.domain.Ring
 import io.embodit.weatherscape.domain.SceneModel
 import io.embodit.weatherscape.domain.Smoke
+import io.embodit.weatherscape.domain.PrecipYield
 import io.embodit.weatherscape.domain.SceneParams
 import io.embodit.weatherscape.domain.Slice
 import io.embodit.weatherscape.domain.V3
@@ -83,7 +84,7 @@ object Names {
  * ```
  */
 internal class DioramaScene(private val scope: CoroutineScope, private val graph: Graph) {
-    val root: Entity = Entity().apply { setName("root") }
+    val root: Entity = Entity().apply { setName("root"); at(V3.ZERO, null, Layout.SCALE) } // q3-3 (D54): the diorama x 1.42
     private val keep = ArrayList<Resource>()
     private fun <T : Resource> T.kept(): T { toGlobal(); synchronized(keep) { keep += this }; return this }
 
@@ -145,6 +146,12 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
     private val rain = ArrayList<Entity>()
     private val snow = ArrayList<Entity>()
     private val smoke = ArrayList<Entity>()
+    // q3-2: rain / snow sheets with the strands in front of the current tag left out (built when a tag goes up)
+    private var rainMatRef: PhysicallyBasedMaterial? = null
+    private val holeSheets = ArrayList<Entity>()
+    private val holeMeshes = ArrayList<MeshResource>()
+    private var holeKey: String? = null
+    private var holeBusy = false
     private val ripples = ArrayList<Entity>()
     private var sun: Entity? = null
     private var sunMat: UnlitMaterial? = null
@@ -210,7 +217,7 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
                 val knob = async(io) { Kit.mesh(Pieces.knob(), "knob").kept() }
                 val knobLabel = async(io) { Kit.mesh(Pieces.quad(0.04f, 0.015f), "knobLabel").kept() }
                 val stepBody = async(io) { Kit.mesh(Pieces.stepButton(), "stepBody").kept() }
-                val stepFace = async(io) { Kit.mesh(Pieces.disc(0.0235f), "stepFace").kept() }
+                val stepFace = async(io) { Kit.mesh(Pieces.disc(Layout.STEP_FACE_R), "stepFace").kept() }
                 val stepBox = async(io) { ShapeResource.createBox(Vector3(Layout.STEP_HIT, Layout.STEP_HIT, 0.03f)).kept() }
                 val clouds = async(io) { (0 until 6).map { Kit.mesh(Pieces.cloud(17 + it * 31), "cloud$it").kept() } }
                 val fog = async(io) { (0 until 2).map { Kit.mesh(Pieces.fogBand(91 + it * 7), "fog$it").kept() } }
@@ -312,7 +319,7 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         val fogMat = Kit.pbr(WhiteLook.FOG, 1f).kept().also { fogMatRef = it }
         fogBands += model(m.fog[0], fogMat, "fog0", V3(0f, FOG_Y[0], 0f)).also { it.enabled = false; root.addChild(it) }
         fogBands += model(m.fog[1], fogMat, "fog1", V3(0f, FOG_Y[1], 0f), Q4.axis(V3.UP, 2.6f)).also { it.enabled = false; root.addChild(it) }
-        val rainMat = Kit.pbr(0xB7C6D3, 0.4f, cull = false).kept().also { dimmable += it to 0xB7C6D3 }
+        val rainMat = Kit.pbr(0xB7C6D3, 0.4f, cull = false).kept().also { dimmable += it to 0xB7C6D3; rainMatRef = it }
         // flakes (v0.1.1, QA #1 "dark dots in front of a bright wall"): 4 mm octahedra show their shaded underside, so they
         // also carry a white emissive that follows the scene brightness (never below 0.6): white from every side
         val snowMat = Kit.pbr(WhiteLook.FLAKE, 0.9f).kept().also { snowFlakeMat = it }
@@ -574,21 +581,32 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
 
         // rain / snow: the sheet bottom stays over the island centre, the top leans downwind (<= 12°)
         val down = V3(p.downX, 0f, p.downZ)
-        val tiltQ = if (p.tiltDeg > 0.1f) Q4.axis(V3.UP.cross(down).let { if (it.length < 1e-4f) V3(1f, 0f, 0f) else it }, Layout.deg(p.tiltDeg)) else Q4.ID
+        val tiltQ = PrecipYield.tiltQ(p.tiltDeg, p.downX, p.downZ)
+        // q3-2: while a tag is up the sheets give way to it (holed copies); until they are built the sheets hide
+        val tgUp = st.tag
+        val wantHole = if (tgUp != null && p.precip != Precip.NONE && p.sheets > 0)
+            "${tgUp.kind}|${p.precip}|${p.sheets}|${"%.2f".format(p.tiltDeg)}|${"%.3f".format(p.downX)}|${"%.3f".format(p.downZ)}" else null
+        if (wantHole != null && wantHole != holeKey) buildHoles(wantHole, tgUp!!.kind, p.precip, p.sheets, tiltQ)
+        val holesReady = wantHole != null && wantHole == holeKey && !holeBusy
         for (i in 0 until 4) {
             val onR = p.precip == Precip.RAIN && i < p.sheets
             val onS = p.precip == Precip.SNOW && i < p.sheets
-            rain[i].enabled = onR; snow[i].enabled = onS
+            rain[i].enabled = onR && wantHole == null; snow[i].enabled = onS && wantHole == null
+            val hole = if (holesReady) holeSheets.getOrNull(i) else null
+            hole?.enabled = onR || onS
             if (onR) {
                 val off = ((t * 0.6f + i * 0.0125f) % Layout.RAIN_STEP)
-                rain[i].at(V3(0f, Layout.PRECIP_Y0, 0f) + tiltQ.rotate(V3(0f, -off, 0f)), tiltQ)
+                val at = V3(0f, Layout.PRECIP_Y0, 0f) + tiltQ.rotate(V3(0f, -off, 0f))
+                rain[i].at(at, tiltQ); hole?.at(at, tiltQ)
             }
             if (onS) {
                 val off = ((t * 0.08f + i * 0.0125f) % Layout.SNOW_STEP)
                 val sway = V3(0.004f * sin(t * 1.3f + i), 0f, 0.004f * kotlin.math.cos(t * 1.1f + i))
-                snow[i].at(V3(0f, Layout.PRECIP_Y0, 0f) + tiltQ.rotate(V3(0f, -off, 0f)) + sway, tiltQ)
+                val at = V3(0f, Layout.PRECIP_Y0, 0f) + tiltQ.rotate(V3(0f, -off, 0f)) + sway
+                snow[i].at(at, tiltQ); hole?.at(at, tiltQ)
             }
         }
+        if (!holesReady) holeSheets.forEach { it.enabled = false }
 
         if (!modelsBuilt) return
         // tree: sway about the root toward downwind (amplitude by wind level, 1 s change)
@@ -657,6 +675,36 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         } else tagEntity?.enabled = false
     }
 
+    /** q3-2: rebuilds the holed rain / snow sheets for tag [kind] (strands crossing in front of its box are left out). */
+    private fun buildHoles(key: String, kind: Ask, precip: Precip, sheets: Int, tiltQ: Q4) {
+        if (holeBusy) return
+        holeBusy = true
+        holeKey = key
+        val rainy = precip == Precip.RAIN
+        val box = tagBox(kind)
+        val mat: Material? = if (rainy) rainMatRef else snowFlakeMat
+        scope.launch {
+            var kept = 0; var full = 0
+            val meshes = withContext(Dispatchers.IO) {
+                runCatching {
+                    (0 until sheets.coerceAtMost(4)).map { i ->
+                        val data = if (rainy) Pieces.rainSheet(3 + i, PrecipYield.rainSkip(tiltQ, box)) else Pieces.snowSheet(5 + i, PrecipYield.snowSkip(tiltQ, box))
+                        kept += data.vertexCount; full += (if (rainy) Pieces.rainSheet(3 + i) else Pieces.snowSheet(5 + i)).vertexCount
+                        Kit.mesh(data, if (rainy) "rainHole$i" else "snowHole$i")
+                    }
+                }.onFailure { Log.w(TAG, "HOLES $key: $it") }.getOrNull()
+            }
+            holeSheets.forEach { runCatching { it.removeFromParent() } }; holeSheets.clear()
+            holeMeshes.forEach { runCatching { it.close() } }; holeMeshes.clear()
+            if (meshes != null && mat != null) {
+                holeMeshes += meshes
+                meshes.forEachIndexed { i, m -> holeSheets += model(m, mat, "precipHole$i").also { it.enabled = false; root.addChild(it) } }
+                Log.i(TAG, "PRECIP yields to tag $kind: ${if (rainy) "rain" else "snow"} x $sheets keeps $kept / $full vertices")
+            } else holeKey = null
+            holeBusy = false
+        }
+    }
+
     /** Top centre of what a tag stands over (design tagsVsModels). */
     fun tagAnchor(k: Ask): V3 = when (k) {
         Ask.SKY -> V3(0f, Layout.CLOUD_Y1, 0f)
@@ -705,6 +753,7 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         synchronized(keep) { keep.forEach { runCatching { it.close() } }; keep.clear() }
         listOf(readTex, ringFaceTex, knobTex, tagTex).forEach { it?.let { t -> runCatching { t.close() } } }
         steps.forEach { b -> b.tex?.let { runCatching { it.close() } }; b.tex = null }
+        holeMeshes.forEach { runCatching { it.close() } }; holeMeshes.clear()
     }
 
     companion object {

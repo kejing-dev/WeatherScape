@@ -191,9 +191,10 @@ object OpenMeteo {
 
     /** One geocoding result object -> a City in [zh] (the other language's name is filled later through /v1/get). */
     fun cityOf(o: JSONObject, zh: Boolean): City {
-        val name = o.optString("name")
-        val admin = o.optString("admin1")
-        val country = o.optString("country")
+        // GeoNames mixes traditional names into language=zh (倫敦, 東京): rows read in simplified Chinese
+        val name = o.optString("name").let { if (zh) Hanzi.toSimplified(it) else it }
+        val admin = o.optString("admin1").let { if (zh) Hanzi.toSimplified(it) else it }
+        val country = o.optString("country").let { if (zh) Hanzi.toSimplified(it) else it }
         return City(
             id = o.optLong("id"),
             nameZh = if (zh) name else "", nameEn = if (zh) "" else name,
@@ -203,19 +204,69 @@ object OpenMeteo {
         )
     }
 
-    fun parseSearch(text: String, zh: Boolean, query: String = ""): List<City> {
-        val o = JSONObject(text)
-        val arr = o.optJSONArray("results") ?: return emptyList()
-        // v0.1.1 (QA #1): "西安" listed Xi'ancun (a village) first. Exact name matches, then seats / big places, then population.
-        val q = query.trim()
-        val hits = (0 until arr.length()).map { arr.getJSONObject(it) }
+    fun parseSearch(text: String, zh: Boolean, query: String = ""): List<City> = parseSearchMany(listOf(text), zh, query)
+
+    /**
+     * Several geocoding answers for one search (the query, its traditional-character spelling, an English alias) merged
+     * by id and ranked. v0.1.3 (QA #3 q3-1): the exact-name rule came first and compared the language=zh name ("巴黎")
+     * with a Latin query ("Paris"), so US towns that keep "Paris" in Chinese won. Now big places (capital, province seat
+     * or >= 1 M people) come first, then exact names (against every spelling), then the feature rank, population, API order.
+     */
+    fun parseSearchMany(texts: List<String>, zh: Boolean, query: String = ""): List<City> {
+        val seen = HashSet<Long>()
+        val hits = texts.flatMap { t ->
+            val arr = runCatching { JSONObject(t).optJSONArray("results") }.getOrNull() ?: return@flatMap emptyList<JSONObject>()
+            (0 until arr.length()).map { arr.getJSONObject(it) }
+        }.filter { seen.add(it.optLong("id")) }
+        val qs = spellings(query.trim())
         val ranked = hits.withIndex().sortedWith(compareBy(
-            { (_, o) -> if (q.isNotEmpty() && o.optString("name").equals(q, ignoreCase = true)) 0 else 1 },
+            { (_, o) -> if (isMajor(o)) 0 else 1 },
+            { (_, o) -> if (qs.isNotEmpty() && norm(o.optString("name")) in qs) 0 else 1 },
             { (_, o) -> featureRank(o.optString("feature_code")) },
             { (_, o) -> -o.optLong("population", 0L) },
             { (i, _) -> i },
         )).map { it.value }
         return ranked.take(3).map { cityOf(it, zh) }
+    }
+
+    /** A capital, a first-level seat, or a place of >= 1 M people. */
+    fun isMajor(o: JSONObject): Boolean {
+        val fc = o.optString("feature_code")
+        return fc == "PPLC" || fc == "PPLA" || o.optLong("population", 0L) >= 1_000_000L
+    }
+
+    private fun norm(s: String) = Hanzi.toSimplified(s.trim().lowercase()).removeSuffix("市")
+    private fun spellings(q: String): Set<String> = if (q.isEmpty()) emptySet() else
+        (listOf(q) + aliasesOf(q)).map { norm(it) }.toSet()
+
+    /** English names of a Chinese query that GeoNames does not list in simplified Chinese (东京 -> Tokyo, 首尔 -> Seoul). */
+    fun aliasesOf(q: String): List<String> {
+        val k = Hanzi.toSimplified(q.trim()).removeSuffix("市")
+        if (k.isEmpty() || !isCjk(k)) return emptyList()
+        return (DefaultCities.ALL.filter { it.nameZh == k }.map { it.nameEn } + listOfNotNull(EXTRA_ALIAS[k])).distinct()
+    }
+
+    private val EXTRA_ALIAS = mapOf(
+        "洛杉矶" to "Los Angeles", "华盛顿" to "Washington", "多伦多" to "Toronto", "蒙特利尔" to "Montreal",
+        "大阪" to "Osaka", "京都" to "Kyoto", "首尔" to "Seoul", "釜山" to "Busan", "墨尔本" to "Melbourne",
+        "罗马" to "Rome", "马德里" to "Madrid", "巴塞罗那" to "Barcelona", "米兰" to "Milan", "维也纳" to "Vienna",
+        "阿姆斯特丹" to "Amsterdam", "布鲁塞尔" to "Brussels", "苏黎世" to "Zurich", "伊斯坦布尔" to "Istanbul",
+        "开罗" to "Cairo", "孟买" to "Mumbai", "新德里" to "New Delhi", "雅加达" to "Jakarta", "吉隆坡" to "Kuala Lumpur",
+        "河内" to "Hanoi", "胡志明" to "Ho Chi Minh City", "马尼拉" to "Manila", "台北" to "Taipei", "高雄" to "Kaohsiung",
+        "澳门" to "Macau", "西雅图" to "Seattle", "波士顿" to "Boston", "迈阿密" to "Miami", "拉斯维加斯" to "Las Vegas",
+        "墨西哥城" to "Mexico City", "里约热内卢" to "Rio de Janeiro", "布宜诺斯艾利斯" to "Buenos Aires", "奥克兰" to "Auckland",
+        "伦敦" to "London", "纽约" to "New York", "东京" to "Tokyo", "巴黎" to "Paris", "北京" to "Beijing",
+    )
+
+    /**
+     * The requests behind one search, in order: the query in its search language, the traditional spelling (GeoNames
+     * lists 東京 / 倫敦 / 紐約, not 东京 / 伦敦 / 纽约), then English aliases, all asked in the same language so the rows
+     * read in Chinese. The first one is required, the rest are best effort.
+     */
+    fun searchQueries(q: String, uiZh: Boolean): List<String> {
+        val t = q.trim()
+        if (!isCjk(t)) return listOf(t)
+        return (listOf(t, Hanzi.toTraditional(t)) + aliasesOf(t)).distinct()
     }
 
     /** Merges the other language's names from a /v1/get answer. */

@@ -220,13 +220,16 @@ internal object Tex {
         val disc = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF6E5120.toInt() }
         c.drawCircle(n / 2f, n / 2f, n / 2f - 2f, disc)
         val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFBF1D6.toInt(); style = Paint.Style.STROKE; strokeWidth = 26f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-        val cx = n / 2f + if (d < 0) -6f else 6f; val cy = n * 0.40f; val a = 40f
+        // v0.1.3 (QA #3 q3-4, D13): the word was 44 px (0.27°); now >= 72 px on a face x 1.42 (Layout.STEP_LABEL_*):
+        // cap height >= 0.5° from the design eye (StepLabelTest). The arrow moves up and gets smaller to make room.
+        val cx = n / 2f + if (d < 0) -4f else 4f; val cy = n * 0.31f; val a = 28f
+        ink.strokeWidth = 20f
         val path = android.graphics.Path()
-        if (d < 0) { path.moveTo(cx + a * 0.55f, cy - a); path.lineTo(cx - a * 0.55f, cy); path.lineTo(cx + a * 0.55f, cy + a) }
-        else { path.moveTo(cx - a * 0.55f, cy - a); path.lineTo(cx + a * 0.55f, cy); path.lineTo(cx - a * 0.55f, cy + a) }
+        if (d < 0) { path.moveTo(cx + a * 0.6f, cy - a); path.lineTo(cx - a * 0.6f, cy); path.lineTo(cx + a * 0.6f, cy + a) }
+        else { path.moveTo(cx - a * 0.6f, cy - a); path.lineTo(cx + a * 0.6f, cy); path.lineTo(cx - a * 0.6f, cy + a) }
         c.drawPath(path, ink)
-        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFBF1D6.toInt(); typeface = bold; textAlign = Paint.Align.CENTER; textSize = 44f }
-        while (p.measureText(word) > n * 0.72f && p.textSize > 20f) p.textSize -= 2f
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFBF1D6.toInt(); typeface = bold; textAlign = Paint.Align.CENTER; textSize = io.embodit.weatherscape.domain.Layout.STEP_LABEL_PX }
+        while (p.measureText(word) > n * 0.86f && p.textSize > io.embodit.weatherscape.domain.Layout.STEP_LABEL_MIN_PX) p.textSize -= 2f
         c.drawText(word, n / 2f, n * 0.78f, p)
         if (testF) { p.textSize = 40f; c.drawText("F↑", n / 2f, n * 0.18f, p) }
         return bmp

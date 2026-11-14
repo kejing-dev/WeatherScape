@@ -16,7 +16,7 @@ import io.embodit.weatherscape.ui.theme.WeatherTheme
 
 /**
  * Two surfaces in Shared Space (design windowModel volume_plus_control_window): the diorama volume (default container,
- * 0.66 x 0.54 x 0.68 m from the manifest) and the control window (Planar 760 x 660 dp, fixed) to its right. Every open
+ * 0.94 x 0.77 x 0.97 m from the manifest, v0.1.3 D54) and the control window (Planar 760 x 660 dp, fixed) to its right. Every open
  * (first open, the knob in S11, the app icon again) uses Placement.right(volume) (profile D44: Shared Space never
  * promises "in front of you"; the user moves the window with the system handle).
  */
