@@ -18,7 +18,7 @@
     <string name="strip_next">Day after</string>
     <string name="howto_title">How it works</string>
     <string name="howto_1">This is the sky over your town right now.</string>
-    <string name="howto_2">Pinch or hold the trigger on the brass ring. Turn right for tomorrow.</string>
+    <string name="howto_2">The ◀ ▶ beside the ring work too. Or pinch / hold the trigger on the ring and turn it right.</string>
     <string name="howto_3">Tap the clouds, the tree or the house to ask.</string>
     <string name="btn_got_it">Got it</string>
     <string name="cities_title">Cities</string>
@@ -49,9 +49,15 @@
     <string name="btn_exit_yes">Quit</string>
     <string name="about">WeatherScape %1$s · Weather data by Open-Meteo.com (CC BY 4.0) · Sounds: CC0 recordings</string>
     <string name="knob">Panel</string>
-    <string name="howto_strip">Rather not drag? Tap any hour on the 48-hour strip and the ring turns there.</string>
+    <string name="howto_strip">Tap a time block to jump there. ◀ ▶ move one hour.</string>
     <string name="search_offline_tip">Your saved cities still work. Search again once you\'re online.</string>
     <string name="replace_hint">You can keep 3 cities. This swaps out the one you looked at least.</string>
     <string name="replace_now">Now: %1$s</string>
     <string name="results_more">Not there? Add the province or country.</string>
+    <string name="step_hour">1 hr</string>
+    <string name="axis_hour">%d</string>
+    <string name="step_back_desc">One hour earlier</string>
+    <string name="step_fwd_desc">One hour later</string>
+    <string name="strip_block">Jump to</string>
+    <string name="strip_block_off">Past the forecast end</string>
 </resources>

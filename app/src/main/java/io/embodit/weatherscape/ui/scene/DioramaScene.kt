@@ -35,6 +35,7 @@ import io.embodit.weatherscape.domain.Smoke
 import io.embodit.weatherscape.domain.SceneParams
 import io.embodit.weatherscape.domain.Slice
 import io.embodit.weatherscape.domain.V3
+import io.embodit.weatherscape.domain.WhiteLook
 import io.embodit.weatherscape.platform.Graph
 import io.embodit.weatherscape.platform.TAG
 import kotlinx.coroutines.CoroutineScope
@@ -49,7 +50,7 @@ import kotlin.math.exp
 import kotlin.math.sin
 
 /** The words the scene draws, already in the app language (resolved by VolumeScreen; D38: same source as the window). */
-internal data class SceneTexts(val read1: String, val read2: String, val knob: String, val tag: String?, val zh: Boolean, val testF: Boolean = false)
+internal data class SceneTexts(val read1: String, val read2: String, val knob: String, val tag: String?, val zh: Boolean, val testF: Boolean = false, val step: String = "1 h")
 
 /** Every holder name the input layer knows (one place, design input.hitTargets: 5 targets). */
 object Names {
@@ -58,7 +59,11 @@ object Names {
     const val SKY = "sky"
     const val TREE = "tree"
     const val HOUSE = "house"
-    val ALL = setOf(RING, KNOB, SKY, TREE, HOUSE)
+    /** v0.1.2 (D53): the 3D ◀ / ▶ buttons beside the ring. */
+    const val STEP_BACK = "stepBack"
+    const val STEP_FWD = "stepFwd"
+    val ALL = setOf(RING, KNOB, SKY, TREE, HOUSE, STEP_BACK, STEP_FWD)
+    fun stepDir(name: String?): Int? = when (name) { STEP_BACK -> -1; STEP_FWD -> 1; else -> null }
 }
 
 /**
@@ -72,6 +77,7 @@ object Names {
  * ├ island (Tripo, calibrated) + snow shell (same mesh, white), pond ripples x6
  * ├ house "house" (Tripo) ── windows glow, roof snow, vane base + arrow; smoke x6
  * ├ tree "tree" (Tripo, sways about its root), lamp (Tripo) + bulb
+ * ├ stepBack "◀" / stepFwd "▶" (v0.1.2, D53: brass discs on the ring's front left / right, collider + HoverEffect)
  * ├ sky "sky" (one collider over the cloud layer) ── clouds x6;  fog bands x2, rain sheets x4, snow sheets x4
  * ├ sun, moon, key light (directional), tag (S05)
  * ```
@@ -105,6 +111,23 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
     private var knobLabelMat: UnlitMaterial? = null
     private var knobTex: TextureResource? = null
     private var knobKey: String? = null
+    // ◀ / ▶ (v0.1.2, D53): holder, body material (greyed at the ends), face material + texture, last press time
+    private class StepBtn(val name: String, val d: Int, val c: V3) {
+        var holder: Entity? = null
+        var body: Entity? = null
+        var bodyMat: PhysicallyBasedMaterial? = null
+        var faceMat: UnlitMaterial? = null
+        var tex: TextureResource? = null
+        var key: String? = null
+        var busy = false
+        @Volatile var pressedAt = -1L
+        var push = 0f
+        var on = true
+        var lastBright = -1f
+    }
+    private val steps = listOf(StepBtn(Names.STEP_BACK, -1, Layout.STEP_BACK_C), StepBtn(Names.STEP_FWD, 1, Layout.STEP_FWD_C))
+    private var smokeMatRef: PhysicallyBasedMaterial? = null
+    private var snowCoverMat: PhysicallyBasedMaterial? = null
     // models
     private var house: Entity? = null
     private var tree: Entity? = null
@@ -186,6 +209,9 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
                 val pointer = async(io) { Kit.mesh(Pieces.pointer(), "pointer").kept() }
                 val knob = async(io) { Kit.mesh(Pieces.knob(), "knob").kept() }
                 val knobLabel = async(io) { Kit.mesh(Pieces.quad(0.04f, 0.015f), "knobLabel").kept() }
+                val stepBody = async(io) { Kit.mesh(Pieces.stepButton(), "stepBody").kept() }
+                val stepFace = async(io) { Kit.mesh(Pieces.disc(0.0235f), "stepFace").kept() }
+                val stepBox = async(io) { ShapeResource.createBox(Vector3(Layout.STEP_HIT, Layout.STEP_HIT, 0.03f)).kept() }
                 val clouds = async(io) { (0 until 6).map { Kit.mesh(Pieces.cloud(17 + it * 31), "cloud$it").kept() } }
                 val fog = async(io) { (0 until 2).map { Kit.mesh(Pieces.fogBand(91 + it * 7), "fog$it").kept() } }
                 val rain = async(io) { (0 until 4).map { Kit.mesh(Pieces.rainSheet(3 + it), "rain$it").kept() } }
@@ -215,6 +241,9 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
             val pointer = d.pointer.getCompleted()
             val knob = d.knob.getCompleted()
             val knobLabel = d.knobLabel.getCompleted()
+            val stepBody = d.stepBody.getCompleted()
+            val stepFace = d.stepFace.getCompleted()
+            val stepBox = d.stepBox.getCompleted()
             val clouds = d.clouds.getCompleted()
             val fog = d.fog.getCompleted()
             val rain = d.rain.getCompleted()
@@ -259,25 +288,40 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         k.addChild(model(m.knobLabel, knobLabelMat!!, "knobLabel", V3(0f, 0f, Layout.KNOB_T + 0.0008f)))
         holder(k, listOf(m.knobBox), m.physics)
         root.addChild(k); knob = k
+        // ◀ / ▶ beside the ring (D53): brass disc + engraved face, collider + system HoverEffect on the holder
+        for (b in steps) {
+            val tiltQ = Q4.axis(V3.UP, Layout.stepYaw(b.c)) * Q4.axis(V3(1f, 0f, 0f), -Layout.deg(Layout.STEP_TILT_DEG))
+            val hld = Entity().apply { setName(b.name); at(b.c, tiltQ) }
+            val bodyMat = Kit.pbr(0xFFFFFF, 0.40f, 0.35f).apply { setBaseColorTexture(m.brassTex) }.kept()
+            val faceMat = Kit.unlit(0xFFFFFF).kept()
+            val body = Entity().apply { setName("${b.name}Body") }
+            body.addChild(model(m.stepBody, bodyMat, "${b.name}Disc"))
+            body.addChild(model(m.stepFace, faceMat, "${b.name}Face", V3(0f, 0f, Layout.STEP_T / 2 + 0.0008f)))
+            hld.addChild(body)
+            holder(hld, listOf(m.stepBox), m.physics)
+            root.addChild(hld)
+            b.holder = hld; b.body = body; b.bodyMat = bodyMat; b.faceMat = faceMat
+        }
         // sky
-        cloudMat = Kit.pbr(0xE9EAEA, 1f).kept()
+        cloudMat = Kit.pbr(WhiteLook.CLOUD[0], 1f).kept()
         val s = Entity().apply { setName(Names.SKY) }
         for (i in 0 until 6) clouds += model(m.clouds[i], cloudMat!!, "cloud$i").also { it.enabled = false; s.addChild(it) }
         holder(s, listOf(m.skyBox), m.physics)
         root.addChild(s); sky = s
         // fog (v0.1.1): two loose rings of soft pale wisps around the island rim, turning slowly in opposite directions
-        val fogMat = Kit.pbr(0xD3D8DD, 1f).kept().also { dimmable += it to 0xD3D8DD; fogMatRef = it }
+        val fogMat = Kit.pbr(WhiteLook.FOG, 1f).kept().also { fogMatRef = it }
         fogBands += model(m.fog[0], fogMat, "fog0", V3(0f, FOG_Y[0], 0f)).also { it.enabled = false; root.addChild(it) }
         fogBands += model(m.fog[1], fogMat, "fog1", V3(0f, FOG_Y[1], 0f), Q4.axis(V3.UP, 2.6f)).also { it.enabled = false; root.addChild(it) }
         val rainMat = Kit.pbr(0xB7C6D3, 0.4f, cull = false).kept().also { dimmable += it to 0xB7C6D3 }
         // flakes (v0.1.1, QA #1 "dark dots in front of a bright wall"): 4 mm octahedra show their shaded underside, so they
         // also carry a white emissive that follows the scene brightness (never below 0.6): white from every side
-        val snowMat = Kit.pbr(0xF7F9FB, 0.9f).kept().also { dimmable += it to 0xF7F9FB; snowFlakeMat = it }
+        val snowMat = Kit.pbr(WhiteLook.FLAKE, 0.9f).kept().also { snowFlakeMat = it }
         for (i in 0 until 4) {
             rain += model(m.rain[i], rainMat, "rain$i").also { it.enabled = false; root.addChild(it) }
             snow += model(m.snow[i], snowMat, "snow$i").also { it.enabled = false; root.addChild(it) }
         }
-        val smokeMat = Kit.pbr(0xCFD0D2, 1f).kept().also { dimmable += it to 0xCFD0D2 }
+        // v0.1.2 (B24, user 11-13 "烟囱的烟也是"黑的): smoke is white like the clouds, an emissive base under the PBR
+        val smokeMat = Kit.pbr(WhiteLook.SMOKE, 1f).kept().also { smokeMatRef = it }
         for (i in 0 until 6) smoke += model(m.puff, smokeMat, "smoke$i").also { it.enabled = false; root.addChild(it) }
         val rippleMat = Kit.pbr(0x9DB2C2, 0.15f).kept().also { dimmable += it to 0x9DB2C2 }
         for (i in 0 until 6) ripples += model(m.ripple, rippleMat, "ripple$i").also { it.enabled = false; root.addChild(it) }
@@ -340,7 +384,7 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         }
         root.addChild(Entity().apply { setName("island"); at(V3(0f, ModelCalib.ISLAND_BOTTOM, 0f)); addChild(calibrated(ModelCalib.ISLAND, island)) })
         // snow shell: the island mesh again, white, lifted 0-4 mm and pulled in 1.5 % so the rim stays grass
-        val snowWhite = Kit.pbr(0xF4F6F8, 0.9f).kept().also { dimmable += it to 0xF4F6F8 }
+        val snowWhite = Kit.pbr(0xF4F6F8, 0.9f).kept().also { dimmable += it to 0xF4F6F8; snowCoverMat = it }
         snowIsland = Entity().apply { setName("snowIsland"); enabled = false }
         val shell = Entity().apply { at(ModelCalib.ISLAND.offset); scale(ModelCalib.ISLAND.scale * 0.985f, ModelCalib.ISLAND.scaleY, ModelCalib.ISLAND.scale * 0.985f) }
         val shellModel = clone(islandSnow); setAllMaterials(shellModel, snowWhite); shell.addChild(shellModel)
@@ -424,6 +468,38 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         }
     }
 
+    private fun applyWhite(mat: PhysicallyBasedMaterial?, l: WhiteLook.Look) {
+        mat ?: return
+        mat.setBaseColor(Color4(l.base[0], l.base[1], l.base[2], 1f))
+        mat.setEmissiveColor(Color4(l.emissive[0], l.emissive[1], l.emissive[2], 1f))
+    }
+
+    /** A ◀ / ▶ press seen by the input layer (the push-in animation starts at once, before the flow answers). */
+    fun pressed(name: String) { steps.firstOrNull { it.name == name }?.pressedAt = SystemClock.uptimeMillis() }
+
+    /** ◀ / ▶: face texture in the app language, greyed at 0 h / the end (M18), pushed in 4 mm while pressed or held. */
+    private fun updateSteps(now: Long, dt: Float, bright: Float) {
+        val flow = graph.flow
+        val tx = texts
+        for (b in steps) {
+            val key = "${b.d}|${tx.step}|${tx.testF}"
+            refreshTexture(key, b.key, b.busy, { b.busy = it }, { Tex.step(b.d, tx.step, tx.testF) }) { tex ->
+                b.faceMat?.setBaseColorTexture(tex); b.tex?.let { runCatching { it.close() } }; b.tex = tex; b.key = key
+            }
+            val on = flow.canStep(b.d)
+            if (on != b.on || abs(bright - b.lastBright) > 0.01f) {
+                val changed = on != b.on
+                b.on = on; b.lastBright = bright
+                b.bodyMat?.setBaseColor(if (on) rgb4(0xFFFFFF, bright) else rgb4(0x6E6E6E, bright))
+                b.faceMat?.setBaseColor(if (on) rgb4(0xFFFFFF) else rgb4(0x8A8A8A))
+                if (changed) Log.i(TAG, "STEP3D ${b.name} ${if (on) "on" else "greyed"}")
+            }
+            val down = flow.holding == b.d || (b.pressedAt >= 0 && now - b.pressedAt < 160)
+            b.push = approach(b.push, if (down && on) 1f else 0f, dt, 0.04f)
+            b.body?.at(V3(0f, 0f, -0.004f * b.push))
+        }
+    }
+
     // ---------------------------------------------------------------- per frame
 
     private fun approach(cur: Float, target: Float, dt: Float, tau: Float) = cur + (target - cur) * (1f - exp(-dt / tau))
@@ -452,15 +528,17 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         ringBandMat?.setEmissiveColor(Color4(0.55f * breath, 0.40f * breath, 0.10f * breath, 1f))
         val knobPulse = if (!graph.window.panelOpen && !reduced) { val e = now % 3000; if (e < 1200) sin(PI.toFloat() * e / 1200f) else 0f } else 0f
         knobMat?.setEmissiveColor(Color4(0.5f * knobPulse, 0.36f * knobPulse, 0.08f * knobPulse, 1f))
+        updateSteps(now, dt, p.brightness)
 
         // brightness (design lighting fallback) + key light (N3)
         if (abs(p.brightness - lastBright) > 0.01f) {
             lastBright = p.brightness
             for ((mat, rgb) in dimmable) mat.setBaseColor(rgb4(rgb, p.brightness))
-            val e = 0.62f * maxOf(0.6f, p.brightness)
-            snowFlakeMat?.setEmissiveColor(Color4(e, e, e * 1.03f, 1f))
-            val f = 0.22f * p.brightness
-            fogMatRef?.setEmissiveColor(Color4(f, f, f * 1.04f, 1f))
+            // B24 whites: base dimmed with the scene, emissive >= 40 % of the colour (WhiteLook, ControlsTest)
+            applyWhite(snowFlakeMat, WhiteLook.look(WhiteLook.FLAKE, p.brightness))
+            applyWhite(fogMatRef, WhiteLook.look(WhiteLook.FOG, p.brightness))
+            applyWhite(smokeMatRef, WhiteLook.look(WhiteLook.SMOKE, p.brightness))
+            snowCoverMat?.let { val e = WhiteLook.emissiveK(p.brightness) * 0.5f; it.setEmissiveColor(Color4(0.96f * e, 0.965f * e, 0.97f * e, 1f)) }
             val g = Color4(p.brightness, p.brightness, p.brightness, 1f)
             for (mat in glbMats) runCatching { mat.setBaseColor(g) }
         }
@@ -475,9 +553,11 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         val shadeKey = p.cloudShade * 1000 + (p.brightness * 100).toInt() + if (flash) 500 else 0
         if (shadeKey != lastCloudKey) {
             lastCloudKey = shadeKey
-            val base = intArrayOf(0xE9EAEA, 0xB9BCC1, 0x6E737A, 0x4C5158)[p.cloudShade]
-            cloudMat?.setBaseColor(rgb4(base, p.brightness))
-            cloudMat?.setEmissiveColor(if (flash) Color4(0.85f, 0.9f, 1.1f, 1f) else Color4(0f, 0f, 0f, 1f))
+            // v0.1.2 (B24, user 11-13 "云怎么是黑的，应该是白云啊"): light greys only, with an emissive base so the PBR light
+            // in a Shared Space volume can't turn them dark; the storm flash lights them bluish white
+            val look = WhiteLook.cloud(p.cloudShade, p.brightness)
+            applyWhite(cloudMat, look)
+            if (flash) cloudMat?.setEmissiveColor(Color4(0.95f, 0.98f, 1.1f, 1f))
         }
         for (i in 0 until 6) {
             cloudScale[i] = approach(cloudScale[i], if (i < p.clouds) 1f else 0f, dt, 0.27f)
@@ -624,6 +704,7 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
     fun dispose() {
         synchronized(keep) { keep.forEach { runCatching { it.close() } }; keep.clear() }
         listOf(readTex, ringFaceTex, knobTex, tagTex).forEach { it?.let { t -> runCatching { t.close() } } }
+        steps.forEach { b -> b.tex?.let { runCatching { it.close() } }; b.tex = null }
     }
 
     companion object {

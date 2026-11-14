@@ -142,9 +142,9 @@ class Ring {
     fun dragCancel(ms: Long) { if (mode == Mode.DRAG) startSnap(ms) }
 
     /** Animate to [h] (back to now = 0, strip tap = that hour). */
-    fun animateTo(h: Int, ms: Long) {
+    fun animateTo(h: Int, ms: Long, durMs: Long? = null) {
         val to = h.coerceIn(0, end).toFloat()
-        snapFrom = pos; snapTo = to; snapAt = ms; snapMs = animMs(pos, to)
+        snapFrom = pos; snapTo = to; snapAt = ms; snapMs = durMs ?: animMs(pos, to)
         mode = Mode.ANIM
         vel = 0f
     }
@@ -201,4 +201,8 @@ class Ring {
     }
 
     val moving: Boolean get() = mode != Mode.IDLE
+
+    /** The whole hour the ring is heading for (an animation's target, else the shown hour): ◀ / ▶ chain from here. */
+    val target: Int get() = if (mode == Mode.ANIM || mode == Mode.SNAP) snapTo.roundToInt().coerceIn(0, end) else shown
+    val endHour: Int get() = end
 }

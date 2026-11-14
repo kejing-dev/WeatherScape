@@ -88,6 +88,23 @@ object Pieces {
         return transform(m, Q4.axis(V3(1f, 0f, 0f), (PI / 2).toFloat()))
     }
 
+    /** A ◀ / ▶ button (v0.1.2): a brass disc Ø 6.2 cm x 2 cm with a rounded front, axis +Z, origin = its centre. */
+    fun stepButton(): MeshData {
+        val r = Layout.STEP_R; val t = Layout.STEP_T
+        val m = Shapes.lathe(V3.ZERO, listOf(0f to 0f, r to 0f, r to t - 0.005f, r - 0.003f to t - 0.0015f, r - 0.007f to t, 0f to t), 64)
+        return transform(m, Q4.axis(V3(1f, 0f, 0f), (PI / 2).toFloat()), V3(0f, 0f, -t / 2))
+    }
+
+    /** A round face [r] facing +Z (48 segments), uv = the square image's inscribed circle (image up = +Y). */
+    fun disc(r: Float, seg: Int = 48): MeshData {
+        val b = MeshBuilder()
+        val n = V3(0f, 0f, 1f)
+        val c = b.v(V3.ZERO, n, 0.5f, 0.5f)
+        val rim = (0..seg).map { k -> val a = 2 * PI.toFloat() * k / seg; b.v(V3(r * kotlin.math.cos(a), r * kotlin.math.sin(a), 0f), n, 0.5f + 0.5f * kotlin.math.cos(a), 0.5f + 0.5f * kotlin.math.sin(a)) }
+        for (k in 0 until seg) b.tri(c, rim[k], rim[k + 1])
+        return b.build()
+    }
+
     fun transform(m: MeshData, q: Q4, t: V3 = V3.ZERO, s: V3 = V3(1f, 1f, 1f)): MeshData {
         val pos = FloatArray(m.pos.size); val nor = FloatArray(m.nor.size)
         for (i in 0 until m.vertexCount) {

@@ -208,5 +208,29 @@ internal object Tex {
         return bmp
     }
 
+    /**
+     * A ◀ / ▶ button face (v0.1.2), 256 x 256 for a Ø 4.6 cm disc: dark brass, a big pale chevron and the word "1 小时" /
+     * "1 hr" under it. [d] < 0 points left. Greyed by the material colour, not here.
+     */
+    fun step(d: Int, word: String, testF: Boolean): Bitmap {
+        val n = 256
+        val bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(0xFFB08A3E.toInt())
+        val disc = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF6E5120.toInt() }
+        c.drawCircle(n / 2f, n / 2f, n / 2f - 2f, disc)
+        val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFBF1D6.toInt(); style = Paint.Style.STROKE; strokeWidth = 26f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+        val cx = n / 2f + if (d < 0) -6f else 6f; val cy = n * 0.40f; val a = 40f
+        val path = android.graphics.Path()
+        if (d < 0) { path.moveTo(cx + a * 0.55f, cy - a); path.lineTo(cx - a * 0.55f, cy); path.lineTo(cx + a * 0.55f, cy + a) }
+        else { path.moveTo(cx - a * 0.55f, cy - a); path.lineTo(cx + a * 0.55f, cy); path.lineTo(cx - a * 0.55f, cy + a) }
+        c.drawPath(path, ink)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFBF1D6.toInt(); typeface = bold; textAlign = Paint.Align.CENTER; textSize = 44f }
+        while (p.measureText(word) > n * 0.72f && p.textSize > 20f) p.textSize -= 2f
+        c.drawText(word, n / 2f, n * 0.78f, p)
+        if (testF) { p.textSize = 40f; c.drawText("F↑", n / 2f, n * 0.18f, p) }
+        return bmp
+    }
+
     @Suppress("unused") private fun unused() = cos(0f)
 }

@@ -78,6 +78,11 @@ interface BoardInputListener<T : Any> {
     /** The pointer travelled past [BoardInputConfig.dragStartM] while held on [target]. Return true to take the drag. */
     fun onDragStart(target: T, source: InputSource): Boolean = false
 
+    /** A press landed on [target] (before any travel); [onRelease] follows when it ends (press-and-hold buttons). */
+    fun onPress(target: T?, source: InputSource) {}
+
+    fun onRelease() {}
+
     /** Total movement since the press, metres, volume axes (+X right, +Y up, +Z toward the user). */
     fun onDragMove(totalM: Offset3M) {}
 
@@ -234,8 +239,10 @@ fun <T : Any> Modifier.boardInput(
                     startHit = hit; startPath = path; startSrc = InputSource.of(v.interactionKind)
                     startMs = SystemClock.uptimeMillis(); maxTravel = 0f; dragging = false
                     log("DRAG press src=${startSrc.label} hit=$hit path=$path")
+                    currentListener.onPress(hit, startSrc)
                 },
                 onDragEnd = {
+                    currentListener.onRelease()
                     val ms = SystemClock.uptimeMillis() - startMs
                     if (dragging) {
                         log("DRAG end src=${startSrc.label} travel=${"%.3f".format(maxTravel)}m ${ms}ms")
@@ -249,6 +256,7 @@ fun <T : Any> Modifier.boardInput(
                     dragging = false
                 },
                 onDragCancel = {
+                    currentListener.onRelease()
                     log("DRAG cancel src=${startSrc.label} dragging=$dragging")
                     if (dragging) currentListener.onDragCancel()
                     dragging = false

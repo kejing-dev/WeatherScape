@@ -91,6 +91,8 @@ class WeatherFlow(
         const val REFETCH_MS = 15 * 60_000L
         const val IDLE_BACK_MS = 30 * 60_000L
         const val TAG_MS = 2_500L
+        /** One ◀ / ▶ hour turns in 220 ms (under the 250 ms hold repeat, so a held button moves smoothly at 4 h/s). */
+        const val STEP_MS = 220L
         const val SEARCH_DEBOUNCE_MS = 400L
         const val SOUND_COOLDOWN_MS = 3_000L
         const val TICK_MIN_MS = 125L // at most 8 a second
@@ -293,6 +295,49 @@ class WeatherFlow(
         log("RING goto $h")
     }
 
+    // ◀ / ▶ (C2 / M18, D53 3D buttons beside the ring): one hour per press, 4 h/s while held, greyed at the ends
+    private val hold = HourHold()
+
+    /** The hour ◀ / ▶ count from and whether each can still move (greyed at 0 h / the end, M18). */
+    fun stepTarget(): Int = synchronized(lock) { ring.target }
+    fun canStep(d: Int): Boolean = synchronized(lock) { if (d < 0) ring.target > 0 else ring.target < ring.endHour }
+
+    /** One hour back (d = -1) or on (+1); back to 0 h settles in S02 (M18). Same call for the window and the 3D buttons. */
+    fun stepHour(d: Int, why: String = "button"): Boolean {
+        touch()
+        val to: Int
+        synchronized(lock) {
+            if (value.phase == Phase.LOADING) return false
+            to = (ring.target + d).coerceIn(0, ring.endHour)
+            if (to == ring.target) return false
+            ring.animateTo(to, upMs(), STEP_MS)
+            _state.value = _state.value.copy(phase = Phase.SCRUB, tag = null)
+        }
+        endWelcome("step")
+        log("RING step ${if (d > 0) "+1" else "-1"} -> $to ($why)")
+        return true
+    }
+
+    /** Press-and-hold start (window ◀ ▶ or the 3D buttons): steps once now, repeats from [step]. */
+    fun holdStart(d: Int, why: String) {
+        val k = synchronized(lock) { hold.press(d, upMs()) }
+        log("HOLD press $d ($why)")
+        if (!stepHour(k, why)) holdEnd(why)
+    }
+
+    fun holdEnd(why: String) {
+        if (hold.dir != 0) log("HOLD release ($why)")
+        synchronized(lock) { hold.release(upMs()) }
+    }
+
+    /** A tap with no press seen first (the system tap path): one step unless the press already stepped. */
+    fun holdTap(d: Int, why: String) {
+        val k = synchronized(lock) { hold.tap(d, upMs()) }
+        if (k != 0) stepHour(k, "$why tap") else log("HOLD tap folded into the press ($why)")
+    }
+
+    val holding: Int get() = hold.dir
+
     /** Debug "scrub <h>" holds the ring on [h] directly (same state path as a settled drag). */
     fun debugScrub(h: Float) {
         touch()
@@ -329,6 +374,8 @@ class WeatherFlow(
             wasMoving = ring.moving
             drawn = ring.step(t)
         }
+        val rep = synchronized(lock) { hold.tick(t) }
+        if (rep != 0 && !stepHour(rep, "hold")) holdEnd("end reached")
         afterMove()
         if (wasMoving && !ring.moving) onSettled(t)
         // S05 expiry, S01 breathing, idle return

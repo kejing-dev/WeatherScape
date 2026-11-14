@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import io.embodit.weatherscape.domain.StripMath
 import io.embodit.weatherscape.domain.Ask
 import io.embodit.weatherscape.domain.DefaultCities
 import io.embodit.weatherscape.domain.Language
@@ -33,6 +34,7 @@ import kotlinx.coroutines.launch
  *   lang zh|en|system · unit c|f · sound 0-3 · mute · tag sky|tree|house · flash · page weather|cities|settings · search "<q>"
  *   pick <i> (search result) · replace yes|no · exitask · closepanel · reopen · s00hold on|off · testf on|off
  *   replay "<holder> [src]" · hover <holder>|off · welcome · dump · evidence · instances
+ *   step -1|1 · hold "<-1|1> <ms>" · block <0-7> · press3d "stepBack|stepFwd [ms] [src]"
  */
 class DebugCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -77,6 +79,20 @@ class DebugCommandReceiver : BroadcastReceiver() {
                 }
             }
             "back" -> flow.backToNow()
+            // v0.1.2: window ◀ ▶ (step -1|1), a held one (hold "<-1|1> <ms>"), a time block (block <0-7>),
+            // the 3D buttons through the volume listener (press3d "stepBack|stepFwd [ms] [src]": press, hold, release)
+            "step" -> a.toIntOrNull()?.let { flow.holdStart(it, "debug"); flow.holdEnd("debug") }
+            "hold" -> { val d = f.getOrNull(0)?.toIntOrNull() ?: 1; val ms = f.getOrNull(1)?.toLongOrNull() ?: 2000L; flow.holdStart(d, "debug"); later(ms) { flow.holdEnd("debug") } }
+            "block" -> a.toIntOrNull()?.let { b -> val end = flow.value.slice.endHour; if (StripMath.enabled(b, end)) flow.gotoHour(StripMath.target(b, end)) else Log.i(TAG, "STRIP block $b greyed") }
+            "press3d" -> {
+                val scene = SceneHolder.scene ?: return
+                val name = f.getOrNull(0) ?: Names.STEP_FWD
+                val ms = f.getOrNull(1)?.toLongOrNull() ?: 120L
+                val src = InputSource.entries.firstOrNull { it.label == f.getOrNull(2) } ?: InputSource.HAND_RAY
+                val l = VolumeListener(graph, scene)
+                l.onPress(name, src)
+                later(ms) { l.onRelease(); l.onTap(name, src, null) }
+            }
             "strip" -> a.toIntOrNull()?.let { flow.gotoHour(it) }
             "city" -> if (a == "sample") flow.debugSample() else (DefaultCities.ALL.firstOrNull { it.nameEn.equals(a, true) || it.nameZh == a } ?: flow.value.cities.firstOrNull { it.nameEn.equals(a, true) || it.nameZh == a })?.let { flow.selectCity(it) }
             "now" -> a.toIntOrNull()?.let { flow.debugSampleNow(it) }

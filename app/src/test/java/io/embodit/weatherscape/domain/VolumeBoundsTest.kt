@@ -27,6 +27,8 @@ class VolumeBoundsTest {
             "house" to modelBox(ModelCalib.HOUSE, ModelCalib.HOUSE_AT).let { Aabb(it.lo, it.hi + V3(0f, 0.035f, 0f)) },
             "lamp" to modelBox(ModelCalib.LAMP, ModelCalib.LAMP_AT),
             "skyHit" to Layout.SKY_HIT,
+            "stepBack" to Layout.stepBox(Layout.STEP_BACK_C), "stepFwd" to Layout.stepBox(Layout.STEP_FWD_C),
+            "stepBackHit" to Layout.stepHitBox(Layout.STEP_BACK_C), "stepFwdHit" to Layout.stepHitBox(Layout.STEP_FWD_C),
         )
         for ((n, b) in parts) assertTrue("$n $b outside $safe", b.inside(safe))
     }
@@ -151,5 +153,27 @@ class VolumeBoundsTest {
         val models = ModelCalib.ALL.sumOf { it.triangles } + ModelCalib.ISLAND.triangles // + snow shell
         println("TRIANGLES procedural=$procedural models=$models total=${procedural + models}")
         assertTrue("total ${procedural + models}", procedural + models <= 62_000 + 12_000) // the snow shell repeats the island (12 k), shown only with snow
+    }
+
+    /** v0.1.2 D53 / D17: the 3D ◀ ▶ are >= 2° and >= 4 cm from every design eye, clear of the ring, the knob, the readout. */
+    @Test fun stepButtonsBigAndClear() {
+        for (c in listOf(Layout.STEP_BACK_C, Layout.STEP_FWD_C)) {
+            val hit = Layout.stepHitBox(c)
+            // >= 1.5 cm from the ring's collider (r 0.290), the knob's collider and the readout
+            val nearR = kotlin.math.sqrt(minOf(kotlin.math.abs(hit.lo.x), kotlin.math.abs(hit.hi.x)).let { it * it } + minOf(kotlin.math.abs(hit.lo.z), kotlin.math.abs(hit.hi.z)).let { it * it })
+            assertTrue("ring gap ${nearR - Layout.RING_HIT_OUT}", nearR - Layout.RING_HIT_OUT >= 0.015f)
+            assertFalse(hit.grow(0.0075f).intersects(Layout.KNOB_HIT_BOX.grow(0.0075f)))
+            assertFalse(hit.intersects(Layout.READOUT_BOX))
+            assertTrue(2 * Layout.STEP_R >= 0.04f)
+            for (eye in Layout.EYES) {
+                val dist = (eye - c).length
+                val deg = Math.toDegrees(2.0 * kotlin.math.atan(Layout.STEP_R / dist.toDouble())).toFloat()
+                val hitDeg = Math.toDegrees(2.0 * kotlin.math.atan(Layout.STEP_HIT / 2 / dist.toDouble())).toFloat()
+                println("STEP ${c.x} eye=$eye d=${"%.2f".format(dist)} disc=${"%.2f".format(deg)}° hit=${"%.2f".format(hitDeg)}°")
+                assertTrue("disc $deg° from $eye", deg >= 1.9f && hitDeg >= 2f)
+            }
+        }
+        // the two buttons mirror each other (D38: one function for both sides)
+        assertTrue(kotlin.math.abs(Layout.stepYaw(Layout.STEP_BACK_C) + Layout.stepYaw(Layout.STEP_FWD_C)) < 1e-5f)
     }
 }

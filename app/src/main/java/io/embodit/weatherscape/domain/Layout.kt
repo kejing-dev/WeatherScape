@@ -65,6 +65,20 @@ object Layout {
     const val KNOB_HIT = 0.065f
     const val KNOB_HIT_H = 0.062f
 
+    // v0.1.2 (D53, user 11-13 "点击那个圆环没法滑动…需要加俩个3D 按钮"): ◀ / ▶ brass buttons on the ring's front left /
+    // right, Ø 6.2 cm (2.03° at 1.75 m), collider 6.6 x 6.6 cm, faces turned to the seated eye (yaw) and leaning back 20°
+    const val STEP_R = 0.031f
+    const val STEP_T = 0.02f
+    const val STEP_HIT = 0.066f
+    const val STEP_TILT_DEG = 20f
+    val STEP_BACK_C = V3(-0.28f, -0.222f, 0.24f)
+    val STEP_FWD_C = V3(0.28f, -0.222f, 0.24f)
+    /** Yaw of a step button so its face points at the seated design eye (0, 0.35, 1.75). */
+    fun stepYaw(c: V3): Float = kotlin.math.atan2(-c.x, 1.75f - c.z)
+    /** Conservative boxes (the disc's bounding sphere / the collider's): bounds, spacing and pick tests. */
+    fun stepBox(c: V3) = Aabb.centred(c, V3(2 * STEP_R + 0.004f, 2 * STEP_R + 0.004f, 2 * STEP_R + 0.004f))
+    fun stepHitBox(c: V3) = Aabb.centred(c, V3(STEP_HIT + 0.012f, STEP_HIT, STEP_HIT + 0.012f))
+
     // island + models (calibrated in ModelCalib)
     const val ISLAND_R = 0.19f
 

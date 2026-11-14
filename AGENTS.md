@@ -1,6 +1,6 @@
 # 天气境 WeatherScape: project guidance
 
-A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.1.
+A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.2.
 Design contract: spatial-app-factory `apps/weather-scape/design-package.json` (v1.0, gate B passed 2026-11-12 with all
 defaults: turn the brass ring through 48 h + tap cloud / tree / house; Open-Meteo, CC BY, non-commercial; Shared Space,
 archetype A, 生产力; stone house A + birch + island A + lamp, procedural vane; no photos / immersive env (v2); 48 h only;
@@ -16,9 +16,20 @@ sound pool, board-input template); weather data, ring, scene and pages are new.
   one merged mesh per sheet sliding on a 5 cm lattice), fog bands, smoke, snow shell (5 k-triangle island copy), roof
   snow, vane, sun / moon on the arc, window / lamp glows (emissive only, no point lights), pond ripples, one ask tag.
   One directional key light (N3 works) + a global brightness factor on every PBR base colour.
-- **Control window** (`WeatherScapeControl`, Planar 560 x 620 dp fixed, `Placement.right(volume)`): native SpatialUI
+- **Control window** (`WeatherScapeControl`, Planar 760 x 660 dp fixed (v0.1.2), `Placement.right(volume)`): native SpatialUI
   `TabBar`, three pages 天气 / 城市 / 设置; first run shows the how-to card on the weather page. No page scrolls.
   [退出应用] closes both containers, removes the tasks and ends the process. The app never reads the head pose.
+
+## v0.1.2 (gate B C1-C5 + user 11-13 on the headset)
+White clouds / smoke / fog / flakes: `domain/Controls.kt WhiteLook` (emissive base >= 40 % of the colour, light greys only;
+white PBR rendered near black in the Shared Space volume on the headset). 3D ◀ ▶ brass buttons on the ring's front left /
+right (`Names.STEP_BACK / STEP_FWD`, holders with collider + HoverEffect, greyed at 0 h / the end, push-in 4 mm); press =
+1 h, held 4 h/s after 0.45 s, release stops (`HourHold`, `WeatherFlow.holdStart / holdEnd / holdTap / stepHour`); the
+board-input template gained `onPress / onRelease`. Control window 760 x 660 dp: row 1 read-only "📍 city · time" + mute,
+row 4 = 8 clickable 6-hour blocks (`StripMath`) with the clock ticks and day names on the strip's bottom edge, row 5 =
+[◀ 1 小时] [回到现在] [1 小时 ▶] (native Buttons, press / release via interactionSource). Ring drag kept as an extra
+(`// gate:allow shared-drag`). Screenshots: `tools/ws.sh shot` now uses the spatial screencap (5120 x 2880 -> 2560 x 1440 +
+a `-panel` crop of the window), the 760 dp window leaves the current-view frame.
 
 ## v0.1.1 (QA #1 rework)
 Smoke yields to every ask tag (`domain/Smoke.kt`); 16 dp between side-by-side buttons; the how-to card teaches both the
@@ -73,4 +84,5 @@ volume and the window. `tools/shots.sh OUTDIR zh|en NAME...` captures a list.
 | S08 离线 | `goto S08` / `offline 1` (`offline 0` refreshes) | cache "x 小时前的预报" or "示例天气" |
 | S09 / S10 设置 | `goto S09` · `goto S10` | |
 | S11 窗口关了 | `goto S11` / `closepanel`; knob tap or `reopen` | |
+| ◀ ▶ / blocks | `step -1|1` · `hold "<-1|1> <ms>"` · `block <0-7>` · `press3d "stepBack|stepFwd [ms] [src]"` (3D button through the volume listener: press, hold, release) | |
 | misc | `flash [ms]` · `clock +1h` · `city <name|sample>` · `lang zh|en` · `unit c|f` · `sound 0-3` · `mute` · `testf on` · `replay "<holder> [src]"` · `dump` · `evidence` · `instances` | |

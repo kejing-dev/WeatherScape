@@ -16,7 +16,7 @@ import io.embodit.weatherscape.ui.theme.WeatherTheme
 
 /**
  * Two surfaces in Shared Space (design windowModel volume_plus_control_window): the diorama volume (default container,
- * 0.66 x 0.54 x 0.68 m from the manifest) and the control window (Planar 560 x 620 dp, fixed) to its right. Every open
+ * 0.66 x 0.54 x 0.68 m from the manifest) and the control window (Planar 760 x 660 dp, fixed) to its right. Every open
  * (first open, the knob in S11, the app icon again) uses Placement.right(volume) (profile D44: Shared Space never
  * promises "in front of you"; the user moves the window with the system handle).
  */
@@ -28,11 +28,11 @@ fun mainApp(scope: SpatialAppScope) =
         WindowContainer(
             Containers.CONTROL,
             form = Form.Planar,
-            defaultSize = WindowContainerSize(width = 560.dp, height = 620.dp),
+            defaultSize = WindowContainerSize(width = 760.dp, height = 660.dp),
             placement = { containers.firstOrNull { it.id == Containers.VOLUME }?.let { Placement.right(it) } ?: Placement.none() },
         ) {
             WeatherTheme {
-                Box(Modifier.windowConstraints(minWidth = 560.dp, minHeight = 620.dp, maxWidth = 560.dp, maxHeight = 620.dp)) { ControlWindow() }
+                Box(Modifier.windowConstraints(minWidth = 760.dp, minHeight = 660.dp, maxWidth = 760.dp, maxHeight = 660.dp)) { ControlWindow() }
             }
         }
     }

@@ -108,7 +108,7 @@ fun VolumeScreen() {
     val unit = graph.unit(settings)
     val loc = remember(context, settings.language) { context.localized(settings.language) }
     val (r1, r2) = Texts.readout(st.slice, st.shown, zh, unit)
-    scene.texts = SceneTexts(r1, r2, loc.getString(R.string.knob), st.tag?.let { graph.flow.tagText(it, zh, unit) }, zh, SceneHolder.testF)
+    scene.texts = SceneTexts(r1, r2, loc.getString(R.string.knob), st.tag?.let { graph.flow.tagText(it, zh, unit) }, zh, SceneHolder.testF, loc.getString(R.string.step_hour))
 
     SpatialView(
         modifier = Modifier
@@ -132,7 +132,7 @@ fun VolumeScreen() {
     )
 }
 
-/** Hit entity (or an ancestor) -> the holder name the flow knows (5 targets, design input.hitTargets). */
+/** Hit entity (or an ancestor) -> the holder name the flow knows (5 design targets + the v0.1.2 ◀ ▶ buttons). */
 internal class VolumeTargets : TargetResolver<String> by TargetResolver.byName(::targetOf) {
     companion object {
         fun targetOf(name: String): String? = name.takeIf { it in Names.ALL }
@@ -154,8 +154,27 @@ internal class VolumeListener(private val graph: Graph, private val scene: Diora
         routeTap(graph, target)
     }
 
+    /** ◀ / ▶ (D53): the press starts the hold (one hour now, 4 h/s after 0.45 s), the release stops it. */
+    private var holdingStep = false
+
+    override fun onPress(target: String?, source: InputSource) {
+        val d = Names.stepDir(target) ?: return
+        BoardInputLog.write(TAG, "INPUT press src=${source.label} target=$target")
+        holdingStep = true
+        scene.pressed(target!!)
+        graph.flow.holdStart(d, "3D $target ${source.label}")
+    }
+
+    override fun onRelease() {
+        if (!holdingStep) return
+        holdingStep = false
+        graph.flow.holdEnd("3D release")
+    }
+
+    // gate:allow shared-drag 用户 11-12 定天气境留 Shared Space，有 3D ◀ ▶ + 时间块点按路径
     override fun onDragStart(target: String, source: InputSource): Boolean {
         BoardInputLog.write(TAG, "INPUT drag src=${source.label} target=$target")
+        if (Names.stepDir(target) != null) return true // a held button that moved a little: still the same press
         if (target != Names.RING) { routeTap(graph, target); return true }
         graph.flow.ringDragStart(gainOf(source))
         dragging = true
@@ -181,6 +200,7 @@ internal class VolumeListener(private val graph: Graph, private val scene: Diora
 internal fun routeTap(graph: Graph, name: String?) {
     when (name) {
         Names.KNOB -> { Log.i(TAG, "S11 knob -> (re)open the control window"); graph.window.open("knob") }
+        Names.STEP_BACK, Names.STEP_FWD -> { SceneHolder.scene?.pressed(name); graph.flow.holdTap(Names.stepDir(name)!!, "3D $name") }
         else -> routeFlow(graph.flow, name)
     }
 }
@@ -191,6 +211,7 @@ internal fun routeFlow(flow: WeatherFlow, name: String?) {
         Names.SKY -> flow.ask(Ask.SKY)
         Names.TREE -> flow.ask(Ask.TREE)
         Names.HOUSE -> flow.ask(Ask.HOUSE)
+        Names.STEP_BACK, Names.STEP_FWD -> flow.holdTap(Names.stepDir(name)!!, "3D $name")
         else -> Unit
     }
 }

@@ -9,6 +9,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,9 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -49,6 +54,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.pico.spatial.ui.design.Button
+import com.pico.spatial.ui.design.ButtonDefaults
 import com.pico.spatial.ui.design.CircularProgressIndicator
 import com.pico.spatial.ui.design.Icon
 import com.pico.spatial.ui.design.LocalContentColor
@@ -67,6 +74,7 @@ import io.embodit.weatherscape.domain.SearchStatus
 import io.embodit.weatherscape.domain.Settings
 import io.embodit.weatherscape.domain.Sky
 import io.embodit.weatherscape.domain.Source
+import io.embodit.weatherscape.domain.StripMath
 import io.embodit.weatherscape.domain.TempUnit
 import io.embodit.weatherscape.domain.Texts
 import io.embodit.weatherscape.domain.Units
@@ -79,7 +87,7 @@ import io.embodit.weatherscape.ui.theme.WeatherColors
 import kotlin.system.exitProcess
 
 /**
- * The control window (Planar 560 x 620 dp beside the diorama): all 2D UI, three pages switched by the native SpatialUI
+ * The control window (Planar 760 x 660 dp beside the diorama, v0.1.2: was 560 x 620): all 2D UI, three pages switched by the native SpatialUI
  * TabBar (D8): 天气 / 城市 / 设置. No page scrolls (D44); each page spreads its rows between the window padding
  * (SpaceBetween), so the blank outside the content is only the padding (M6). Every count of clickable things per page is
  * <= 7 including the three tabs (B31 / design controlCount).
@@ -131,6 +139,11 @@ private fun PageColumn(content: @Composable ColumnScope.() -> Unit) {
 
 // ------------------------------------------------------------------ Weather (S00 / S02 / S03 / S04 / S08)
 
+/**
+ * v0.1.2 (gate B C1-C3 + user 11-13 "panel 要大一点，时刻分到的太细不太好点，时刻应该显示在那个 UI 可以点的区域的横轴"):
+ * row 1 = read-only "city · time" + [静音] (always shown, D15); row 4 = 8 tappable 6-hour blocks with the clock ticks on
+ * their bottom edge; row 5 = [◀ 1 小时] [回到现在] [1 小时 ▶] (press-and-hold repeats, M18).
+ */
 @Composable
 private fun WeatherPage(st: WState, settings: Settings, zh: Boolean, unit: TempUnit, graph: Graph) {
     val flow = graph.flow
@@ -139,16 +152,20 @@ private fun WeatherPage(st: WState, settings: Settings, zh: Boolean, unit: TempU
     val h = st.shown
     val x = s.at(h)
     PageColumn {
-        // row 1: city button + time label (+ S08 note)
+        // row 1: 📍 city · time (read only, C3) + mute (right, always shown)
         Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
-            val cityName = st.city?.name(zh) ?: stringResource(R.string.sample_city)
-            SecondaryButton("$cityName  ›", "weather/city", onClick = { Ui.page = Page.CITIES }, modifier = Modifier.height(64.dp))
-            Spacer(Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.End) {
-                Txt(Texts.time(s, h, zh), "weather/time", style = PicoTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold))
+            Icon(painter = painterResource(R.drawable.ic_tab_cities), contentDescription = null, modifier = Modifier.size(26.dp), tint = WeatherColors.InkSecondary)
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                val cityName = st.city?.name(zh) ?: stringResource(R.string.sample_city)
+                Txt("$cityName · ${Texts.time(s, h, zh)}", "weather/place", style = PicoTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), color = WeatherColors.Ink)
                 val note = if (st.offline && s.source == Source.CACHE) stringResource(R.string.offline_line, s.ageHours.coerceAtLeast(1)) else Texts.sourceNote(s, zh)
                 if (note != null) Txt(note, "weather/source", style = PicoTheme.typography.bodySmall, color = WeatherColors.InkSecondary, maxLines = 2)
             }
+            Spacer(Modifier.width(16.dp))
+            ToggleButton(stringResource(if (settings.muted) R.string.btn_unmute else R.string.btn_mute), "weather/mute", on = settings.muted,
+                icon = if (settings.muted) R.drawable.ic_sound else R.drawable.ic_mute,
+                onClick = { graph.settings.update { it.toggleMute() } }, modifier = Modifier.width(168.dp).height(64.dp))
         }
         if (loading) {
             Column(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -173,45 +190,114 @@ private fun WeatherPage(st: WState, settings: Settings, zh: Boolean, unit: TempU
                 val line = if (st.noCity && st.city == null) stringResource(R.string.no_city_hint) else Texts.advice(s, h, zh, unit).second
                 Txt(line, "weather/advice", style = PicoTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = WeatherColors.Ink, maxLines = 2)
             }
-            // row 4: the 48 h strip (tap an hour = the ring turns there)
-            Strip(st, zh, Modifier.fillMaxWidth().height(132.dp)) { flow.gotoHour(it) }
+            // row 4: 8 blocks x 6 h (tap = the ring turns to the block's middle hour); the chart is display only
+            Strip(st, zh, Modifier.fillMaxWidth().height(STRIP_H)) { b ->
+                val t = StripMath.target(b, s.endHour)
+                Log.i(TAG, "STRIP block $b -> $t")
+                flow.gotoHour(t)
+            }
         }
-        // row 5: back to now + mute (always shown, D15); 16 dp apart (B31, QA #1 q1-2)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        // row 5: [◀ 1 小时] [回到现在] [1 小时 ▶], 16 dp apart (B31), 72 dp tall (C2)
+        Row(Modifier.fillMaxWidth().height(72.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             val atNow = h == 0 && (st.phase == Phase.NOW || st.phase == Phase.LOADING || st.phase == Phase.WELCOME)
+            val target = if (st.phase == Phase.SCRUB) flow.stepTarget() else h
+            StepButton(-1, enabled = !loading && target > 0, graph, Modifier.weight(1f).height(72.dp))
             SecondaryButton(stringResource(if (atNow) R.string.btn_now else R.string.btn_back_now), "weather/back", onClick = { flow.backToNow() }, enabled = !atNow && !loading,
-                icon = R.drawable.ic_back_now, highlight = !atNow && !loading, modifier = Modifier.weight(1f).height(64.dp))
-            ToggleButton(stringResource(if (settings.muted) R.string.btn_unmute else R.string.btn_mute), "weather/mute", on = settings.muted,
-                icon = if (settings.muted) R.drawable.ic_sound else R.drawable.ic_mute,
-                onClick = { graph.settings.update { it.toggleMute() } }, modifier = Modifier.weight(1f).height(64.dp))
+                icon = R.drawable.ic_back_now, highlight = !atNow && !loading, modifier = Modifier.weight(1.3f).height(72.dp))
+            StepButton(1, enabled = !loading && target < s.endHour, graph, Modifier.weight(1f).height(72.dp))
         }
     }
 }
 
-/** 48 h strip (design row 4): temperature line on top, rain-chance bars below, day lines + names, the cursor = the ring. */
+private val STRIP_H = 156.dp
+
+/** ◀ / ▶ 1 hour: a native Button whose press starts the hold (4 h/s after 0.45 s) and whose release stops it (M18). */
 @Composable
-private fun Strip(st: WState, zh: Boolean, modifier: Modifier, onHour: (Int) -> Unit) {
+private fun StepButton(d: Int, enabled: Boolean, graph: Graph, modifier: Modifier) {
+    val src = remember { MutableInteractionSource() }
+    val why = if (d < 0) "window ◀" else "window ▶"
+    LaunchedEffect(src) {
+        src.interactions.collect { i ->
+            when (i) {
+                is PressInteraction.Press -> graph.flow.holdStart(d, why)
+                is PressInteraction.Release, is PressInteraction.Cancel -> graph.flow.holdEnd(why)
+            }
+        }
+    }
+    LaunchedEffect(enabled) { if (!enabled) graph.flow.holdEnd("$why greyed") }
+    val fg = PicoTheme.colorScheme.labelPrimary
+    Button(
+        onClick = { graph.flow.holdTap(d, why) }, modifier = modifier, enabled = enabled,
+        size = ButtonDefaults.Regular.copy(height = 72.dp, minWidth = 144.dp),
+        shape = RoundedCornerShape(36.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = PicoTheme.colorScheme.fillSecondary, contentColor = fg),
+        interactionSource = src,
+    ) {
+        val label = stringResource(R.string.step_hour)
+        if (d < 0) Icon(painter = painterResource(R.drawable.ic_chev_left), contentDescription = stringResource(R.string.step_back_desc), modifier = Modifier.size(30.dp), tint = fg)
+        // design-style: inherited-content-color Button
+        Txt(label, if (d < 0) "weather/step-back" else "weather/step-fwd", style = PicoTheme.typography.titleMedium, color = fg)
+        if (d > 0) Icon(painter = painterResource(R.drawable.ic_chev_right), contentDescription = stringResource(R.string.step_fwd_desc), modifier = Modifier.size(30.dp), tint = fg)
+    }
+}
+
+/** Axis hour word: zh "6 点", en "6 AM" / "Noon" / "6 PM". */
+private fun hourWord(hod: Int, zh: Boolean, zhFmt: String): String =
+    if (zh) zhFmt.format(hod) else when (hod) { 12 -> "Noon"; 0 -> "12 AM"; else -> if (hod < 12) "$hod AM" else "${hod - 12} PM" }
+
+/**
+ * 48 h strip (design row 4, v0.1.2): 8 tappable blocks of 6 h (C1, >= 64 x 64 dp); temperature line + rain bars on top
+ * (display only), the clock ticks 0 / 6 / 12 / 18 and the day names on the strip's own bottom axis (the tappable area),
+ * the cursor = the ring. Blocks past the end are greyed and do nothing (M18).
+ */
+@Composable
+private fun Strip(st: WState, zh: Boolean, modifier: Modifier, onBlock: (Int) -> Unit) {
     val s = st.slice
-    val n = s.hours.size
+    val n = s.hours.size.coerceAtMost(48)
+    val end = s.endHour
     val names = listOf(stringResource(R.string.strip_today), stringResource(R.string.strip_tomorrow), stringResource(R.string.strip_next))
+    val zhFmt = stringResource(R.string.axis_hour)
     val labelPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG) }
+    val dayPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { typeface = android.graphics.Typeface.DEFAULT_BOLD } }
+    val zhFmt2 = zhFmt
+    Box(modifier.clip(RoundedCornerShape(16.dp)).background(WeatherColors.CardFace)) {
+    // the 8 blocks are real clickable nodes (system pointer, accessibility, pico-cli interact): tap = the block's middle hour
+    Row(Modifier.fillMaxSize()) {
+        for (b in 0 until StripMath.BLOCKS) {
+            val on = StripMath.enabled(b, end)
+            val t = StripMath.target(b, end)
+            val label = if (on) "${stringResource(R.string.strip_block)} ${Texts.time(s, t, zh)}" else stringResource(R.string.strip_block_off)
+            Box(Modifier.weight(1f).fillMaxHeight().semantics { contentDescription = label }
+                .clickable(enabled = on) { Log.i(TAG, "STRIP tap block $b"); onBlock(b) })
+        }
+    }
     Canvas(
-        modifier.clip(RoundedCornerShape(16.dp)).background(WeatherColors.CardFace)
-            .pointerInput(n) { detectTapGestures { o -> val i = (o.x / size.width * n).toInt().coerceIn(0, n - 1); Log.i(TAG, "STRIP tap $i"); onHour(i) } },
+        Modifier.fillMaxSize(),
     ) {
         val w = size.width; val hgt = size.height
-        val cw = w / n
-        val labelH = 26.dp.toPx()
-        val top = 10.dp.toPx(); val mid = (hgt - labelH) * 0.48f; val bottom = hgt - labelH
+        val bw = w / StripMath.BLOCKS
+        val cw = w / 48f
+        val axisH = 46.dp.toPx()
+        val top = 10.dp.toPx(); val axisY = hgt - axisH; val mid = axisY * 0.50f
+        // blocks: the current one is lit, the ones past the end greyed
+        val cur = StripMath.blockOf(st.shown)
+        for (b in 0 until StripMath.BLOCKS) {
+            val x0 = b * bw
+            when {
+                !StripMath.enabled(b, end) -> drawRect(Color(0x33000000), Offset(x0, 0f), Size(bw, hgt))
+                b == cur -> drawRoundRect(WeatherColors.PrimaryContainer, Offset(x0 + 2.dp.toPx(), 2.dp.toPx()), Size(bw - 4.dp.toPx(), hgt - 4.dp.toPx()), androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()))
+            }
+            if (b > 0) drawLine(WeatherColors.Grid, Offset(x0, 0f), Offset(x0, hgt), strokeWidth = 2.dp.toPx())
+        }
         // rain bars
         for (i in 0 until n) {
             val p = s.hours[i].popEff / 100f
             if (p <= 0f) continue
-            val bh = (bottom - mid - 4.dp.toPx()) * p
-            drawRect(WeatherColors.RainBar, Offset(i * cw + cw * 0.15f, bottom - bh), Size(cw * 0.7f, bh))
+            val bh = (axisY - mid - 4.dp.toPx()) * p
+            drawRect(WeatherColors.RainBar, Offset(i * cw + cw * 0.18f, axisY - bh), Size(cw * 0.64f, bh))
         }
         // temperature line
-        val tMin = s.hours.minOf { it.temp }; val tMax = s.hours.maxOf { it.temp }
+        val tMin = s.hours.take(n).minOf { it.temp }; val tMax = s.hours.take(n).maxOf { it.temp }
         val span = (tMax - tMin).coerceAtLeast(1f)
         val path = Path()
         for (i in 0 until n) {
@@ -220,23 +306,27 @@ private fun Strip(st: WState, zh: Boolean, modifier: Modifier, onHour: (Int) -> 
             if (i == 0) path.moveTo(xx, y) else path.lineTo(xx, y)
         }
         drawPath(path, WeatherColors.TempLine, style = Stroke(width = 3.dp.toPx()))
-        // day lines + names
-        labelPaint.color = WeatherColors.InkSecondary.toArgb()
-        labelPaint.textSize = 14.sp.toPx()
-        val firstBoundary = (1 until n).firstOrNull { s.hours[it].dayIndex != s.hours[it - 1].dayIndex }?.let { it * cw } ?: w
-        if (firstBoundary > labelPaint.measureText(names[0]) + 12.dp.toPx()) drawContext.canvas.nativeCanvas.drawText(names[0], 4.dp.toPx(), hgt - 7.dp.toPx(), labelPaint)
-        for (i in 1 until n) {
-            if (s.hours[i].dayIndex != s.hours[i - 1].dayIndex) {
-                val xx = i * cw
-                drawLine(WeatherColors.Grid, Offset(xx, top), Offset(xx, bottom), strokeWidth = 1.5.dp.toPx())
-                val d = s.hours[i].dayIndex.coerceIn(0, 2)
-                if (xx < w - 60.dp.toPx()) drawContext.canvas.nativeCanvas.drawText(names[d], xx + 4.dp.toPx(), hgt - 7.dp.toPx(), labelPaint)
-            }
+        // the axis on the strip's bottom edge: base line, ticks every hour (long at 0 / 6 / 12 / 18), day lines, labels
+        drawLine(WeatherColors.Grid, Offset(0f, axisY), Offset(w, axisY), strokeWidth = 1.5.dp.toPx())
+        for (i in 0 until n) {
+            val hod = s.hours[i].hod
+            val xx = i * cw + cw / 2
+            val long = hod % 6 == 0
+            drawLine(if (i <= end) WeatherColors.InkSecondary else WeatherColors.Grid, Offset(xx, axisY), Offset(xx, axisY + if (long) 9.dp.toPx() else 4.dp.toPx()), strokeWidth = if (long) 2.dp.toPx() else 1.dp.toPx())
+            if (hod == 0 && i > 0) drawLine(WeatherColors.Ink, Offset(i * cw, top), Offset(i * cw, hgt - 4.dp.toPx()), strokeWidth = 2.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())))
         }
+        labelPaint.textSize = 14.sp.toPx(); labelPaint.color = WeatherColors.InkSecondary.toArgb()
+        dayPaint.textSize = 15.sp.toPx(); dayPaint.color = WeatherColors.Ink.toArgb()
+        val ticks = StripMath.ticks(s.hours.map { it.hod }, s.hours.map { it.dayIndex }, end, { d -> names[d.coerceIn(0, 2)] }, { hod -> hourWord(hod, zh, zhFmt) })
+        val placed = StripMath.place(ticks, w, 6.dp.toPx(), { h -> h * cw + cw / 2 }, { t -> (if (t.day) dayPaint else labelPaint).measureText(t.text) }, { h -> if (h == 0) 4.dp.toPx() else h * cw + 4.dp.toPx() })
+        val baseY = hgt - 12.dp.toPx()
+        for ((t, left) in placed) drawContext.canvas.nativeCanvas.drawText(t.text, left, baseY, if (t.day) dayPaint else labelPaint)
+        if (BuildConfig.DEBUG) Log.d(TAG, "STRIP axis ${placed.joinToString { it.first.text }}")
         // cursor = the ring's hour
         val cx = st.shown * cw + cw / 2
-        drawLine(WeatherColors.Ink, Offset(cx, 4.dp.toPx()), Offset(cx, bottom), strokeWidth = 3.dp.toPx())
+        drawLine(WeatherColors.Ink, Offset(cx, 4.dp.toPx()), Offset(cx, axisY), strokeWidth = 3.dp.toPx())
         drawCircle(WeatherColors.Ink, 5.dp.toPx(), Offset(cx, 6.dp.toPx()))
+    }
     }
 }
 
@@ -247,9 +337,9 @@ private fun HowToPage(graph: Graph) {
     PageColumn {
         Txt(stringResource(R.string.howto_title), "howto/title", style = PicoTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
         HowToFigure(Modifier.fillMaxWidth().height(136.dp))
-        // D53 (Shared Space kept): teach both ways to move time, turning the ring and tapping the 48 h strip
+        // C4 (v0.1.2): tapping a block / ◀ ▶ is the main way, the 3D ◀ ▶ and turning the ring come after (D53, Shared Space kept)
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(R.string.howto_1, R.string.howto_2, R.string.howto_strip, R.string.howto_3).forEachIndexed { i, id ->
+            listOf(R.string.howto_1, R.string.howto_strip, R.string.howto_2, R.string.howto_3).forEachIndexed { i, id ->
                 Row(verticalAlignment = Alignment.Top) {
                     Box(Modifier.size(28.dp).clip(CircleShape).background(WeatherColors.Primary), contentAlignment = Alignment.Center) {
                         Txt("${i + 1}", "howto/n", style = PicoTheme.typography.labelLarge, color = WeatherColors.OnPrimary)

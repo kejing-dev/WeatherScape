@@ -24,7 +24,7 @@ echo "recents lines with package: $(grep 'Recent #' "$B/exit-recents.txt" | grep
 L; sleep 9; "$K" cmd lang en; sleep 2
 "$ADB" -s "$DEV" shell am force-stop $PKG; sleep 2; L; sleep 10; "$K" shot "$B/default-view.png"
 for src in hand-ray eye-hand controller; do
-  for t in ring knob sky tree house; do "$K" cmd replay "$t $src"; sleep 0.8; done
+  for t in ring knob sky tree house stepBack stepFwd; do "$K" cmd replay "$t $src"; sleep 0.8; done
 done
 sleep 1
 "$ADB" -s "$DEV" shell run-as $PKG cat files/input-log.txt | grep -E "REPLAY|INPUT|RINGMOVE|DRAG" > "$B/input-replay.txt"
