@@ -11,7 +11,7 @@ import kotlin.math.atan
 class Rework3Test {
     private fun deg(rad: Double) = Math.toDegrees(rad)
 
-    /** q3-2: no streak or flake of any sheet passes in front of a tag, at any tilt / wind direction / slide offset. */
+    /** q3-2: no rain streak passes in front of a tag, at any tilt / wind direction / slide offset (v0.1.4: snow, see SkyModelsTest). */
     @Test fun precipitationGivesWayToEveryTag() {
         for (kind in Ask.values()) {
             val box = DioramaScene.tagBox(kind)
@@ -19,26 +19,21 @@ class Rework3Test {
             for (tilt in listOf(0f, 4f, 8f, 12f)) for (k in 0 until 8) {
                 val a = Math.PI * 2 * k / 8
                 val q = PrecipYield.tiltQ(tilt, kotlin.math.sin(a).toFloat(), kotlin.math.cos(a).toFloat())
-                for (rain in listOf(true, false)) {
-                    var kept = 0; var all = 0
-                    for (i in 0 until 4) {
-                        val mesh = if (rain) Pieces.rainSheet(3 + i, PrecipYield.rainSkip(q, box)) else Pieces.snowSheet(5 + i, PrecipYield.snowSkip(q, box))
-                        val whole = if (rain) Pieces.rainSheet(3 + i) else Pieces.snowSheet(5 + i)
-                        all += whole.vertexCount; kept += mesh.vertexCount
-                        val step = if (rain) Layout.RAIN_STEP else Layout.SNOW_STEP
-                        for (s in 0 until 10) {
-                            val off = step * s / 10f
-                            val sway = if (rain) V3.ZERO else V3(0.004f, 0f, 0.004f)
-                            for (v in 0 until mesh.vertexCount) {
-                                val p = V3(0f, Layout.PRECIP_Y0, 0f) + q.rotate(V3(mesh.pos[3 * v], mesh.pos[3 * v + 1] - off, mesh.pos[3 * v + 2])) + sway
-                                val inFront = p.x in zone.lo.x..zone.hi.x && p.y in zone.lo.y..zone.hi.y && p.z >= zone.lo.z
-                                assertTrue("$kind tilt $tilt dir $k ${if (rain) "rain" else "snow"} sheet $i vertex $p in front of the tag $zone", !inFront)
-                            }
+                var kept = 0; var all = 0
+                for (i in 0 until 4) {
+                    val mesh = Pieces.rainSheet(3 + i, PrecipYield.rainSkip(q, box))
+                    all += Pieces.rainSheet(3 + i).vertexCount; kept += mesh.vertexCount
+                    for (s in 0 until 10) {
+                        val off = Layout.RAIN_STEP * s / 10f
+                        for (v in 0 until mesh.vertexCount) {
+                            val p = V3(0f, Layout.PRECIP_Y0, 0f) + q.rotate(V3(mesh.pos[3 * v], mesh.pos[3 * v + 1] - off, mesh.pos[3 * v + 2]))
+                            val inFront = p.x in zone.lo.x..zone.hi.x && p.y in zone.lo.y..zone.hi.y && p.z >= zone.lo.z
+                            assertTrue("$kind tilt $tilt dir $k rain sheet $i vertex $p in front of the tag $zone", !inFront)
                         }
                     }
-                    // it still rains / snows around the tag: most drops / flakes stay
-                    assertTrue("$kind $tilt $k kept $kept / $all", kept >= all / 2)
                 }
+                // it still rains around the tag: most drops stay
+                assertTrue("$kind $tilt $k kept $kept / $all", kept >= all / 2)
             }
         }
     }

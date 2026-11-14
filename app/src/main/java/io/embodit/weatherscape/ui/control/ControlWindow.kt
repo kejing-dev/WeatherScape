@@ -520,6 +520,9 @@ private fun SettingsPage(settings: Settings, zh: Boolean, unit: TempUnit, graph:
             Segments((0..3).map { it to "${stringResource(names[it])} ${Settings.PERCENT[it]}%" }, settings.sound, "settings/sound",
                 { v -> if (!confirm) graph.settings.update { it.withSound(v) } }, Modifier.fillMaxWidth().height(64.dp), small = true, enabled = !confirm)
         }
+        // v0.1.4 (B19): the how-to card again, any time (Settings opens it on the weather page)
+        SecondaryButton(stringResource(R.string.howto_again), "settings/howto", onClick = { if (!confirm) { graph.flow.showHowTo(); Ui.page = Page.WEATHER } },
+            modifier = Modifier.fillMaxWidth().height(64.dp), enabled = !confirm)
         if (confirm) {
             // S10: the confirmation replaces the quit row in place; the three rows above are greyed out
             Row(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(20.dp)).background(WeatherColors.CardFace).padding(start = 16.dp, end = 4.dp),

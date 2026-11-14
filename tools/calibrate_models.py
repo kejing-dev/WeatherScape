@@ -23,10 +23,40 @@ MODELS = {  # id: (file, design size, axis)
 }
 ISLAND_H = 0.05          # squashed thickness (sample adopt(): min(1, 0.05 / h))
 ISLAND_BOTTOM = -0.202   # plinth top -0.19, sunk 1.2 cm
+# v0.1.4 (B12, user 11-14 "太阳和月亮 云，烟都要有自己的模型"): the sky's own Tripo models (lod/ = glb_decimate.py output).
+# id: (file, fit box (x, y, z) in metres - uniform scale to the largest that fits, texture look, emissive factor or None)
+SKY = {
+    "sun": ("sun.glb", (0.036, 0.036, 0.036), "keep", 1.0),        # glowing disc + rays facing +Z, self-lit texture
+    "moon": ("moon.glb", (0.026, 0.026, 0.026), "moon", 0.85),     # craters; the phase shell darkens the night side
+    "cloud_a": ("cloud_round.glb", (0.14, 0.07, 0.10), "cloud", 1.0),   # emissive = the shaded texture, so the folds
+    "cloud_b": ("cloud_long.glb", (0.14, 0.07, 0.10), "cloud", 1.0),    # still read when the emissive floor (B24) lights
+    "cloud_c": ("cloud_puffy.glb", (0.14, 0.07, 0.10), "cloud", 1.0),   # the cloud (WhiteLook colours it per sky)
+    "smoke_curl": ("smoke_cut.glb", (0.03, 0.024, 0.03), "cloud", 1.0),
+}
 PLACE = {"house": (-0.085, -0.075), "tree": (0.100, -0.055), "lamp": (-0.130, 0.095)}
 
 
-def rename_node(path, name):
+def restyle(path, look):
+    """Texture looks: clouds / smoke -> neutral near-white (the Tripo cream tint read yellow next to the WhiteLook greys),
+    moon -> lifted 35 % so the craters read at night; sun kept."""
+    if look == "keep":
+        return
+    from PIL import Image
+    sc = trimesh.load(path)
+    g = list(sc.geometry.values())[0]
+    im = np.asarray(g.visual.material.baseColorTexture.convert("RGB")).astype(float)
+    lum = im @ [0.2126, 0.7152, 0.0722]
+    if look == "cloud":
+        # stretch the folds' shading (x 2.4 around 228) so the puffs read, a hint of cool
+        v = np.clip(228 + (lum - lum.mean()) * 2.4, 120, 255)
+        out = np.stack([v * 0.985, v * 0.992, v], -1)
+    else:
+        out = np.clip(im * 1.35 + 10, 0, 255)
+    g.visual.material.baseColorTexture = Image.fromarray(out.astype(np.uint8))
+    sc.export(path)
+
+
+def rename_node(path, name, emissive=None):
     b = bytearray(open(path, "rb").read())
     n = struct.unpack("<I", b[12:16])[0]
     j = json.loads(b[20:20 + n])
@@ -34,6 +64,11 @@ def rename_node(path, name):
         nd["name"] = name
     for m in j.get("materials", []):
         m["alphaMode"] = "OPAQUE"
+        if emissive is not None:  # self-lit: the base texture also drives the emissive
+            tex = m.get("pbrMetallicRoughness", {}).get("baseColorTexture")
+            if tex:
+                m["emissiveTexture"] = {"index": tex["index"]}
+                m["emissiveFactor"] = [emissive] * 3
     js = json.dumps(j, separators=(",", ":")).encode()
     while len(js) % 4:
         js += b" "
@@ -108,6 +143,22 @@ def main():
     for mid, f, lo, hi, k, ky, cx, by_, cz, tris in rows:
         out.append('    val %s = ModelCal("%s", "%s", %s, %s, %.6ff, %.6ff, %s, %d)' % (mid.upper(), mid, f, v3(lo), v3(hi), k, ky, v3((cx, by_, cz)), tris))
     out.append("    val ALL = listOf(ISLAND, HOUSE, TREE, LAMP)")
+    for mid, (f, box, look, em) in SKY.items():
+        dst = os.path.join(OUT, mid + ".glb")
+        shutil.copyfile(os.path.join(SRC, f), dst)
+        restyle(dst, look)
+        rename_node(dst, mid, em)
+        sc = trimesh.load(dst)
+        g = list(sc.geometry.values())[0]
+        lo, hi = sc.bounds
+        ext = hi - lo
+        k = min(box[0] / ext[0], box[1] / ext[1], box[2] / ext[2])
+        cx, cz = (lo[0] + hi[0]) / 2, (lo[2] + hi[2]) / 2
+        out.append("    /** v0.1.4 sky model %s (Tripo %s, fit %s m, %d triangles). */" % (mid, f, box, len(g.faces)))
+        out.append('    val %s = ModelCal("%s", "%s", %s, %s, %.6ff, %.6ff, %s, %d)' % (mid.upper(), mid, f, v3(lo), v3(hi), k, k, v3((cx, lo[1], cz)), len(g.faces)))
+        print("%-10s scale %.4f size %s tris %d" % (mid, k, (ext * k).round(4), len(g.faces)))
+    out.append("    val CLOUDS = listOf(CLOUD_A, CLOUD_B, CLOUD_C)")
+    out.append("    val SKY = listOf(SUN, MOON, CLOUD_A, CLOUD_B, CLOUD_C, SMOKE_CURL)")
     out.append("    /** Island bottom (scene y): the plinth top -0.19, sunk 1.2 cm. */")
     out.append("    const val ISLAND_BOTTOM = %.4ff" % ISLAND_BOTTOM)
     out.append("    /** Highest island point (scene y), design -0.155. */")

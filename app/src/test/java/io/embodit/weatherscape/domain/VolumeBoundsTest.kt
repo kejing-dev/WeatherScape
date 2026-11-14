@@ -61,10 +61,11 @@ class VolumeBoundsTest {
         }
     }
 
-    @Test fun cloudMeshesFitTheirBox() {
-        for (i in 0 until 6) {
-            val (lo, hi) = Pieces.cloud(17 + i * 31).bounds()
-            assertTrue("cloud $i ${hi - lo}", hi.x - lo.x <= Layout.CLOUD_W + 1e-3f && hi.y - lo.y <= Layout.CLOUD_H + 1e-3f && hi.z - lo.z <= Layout.CLOUD_D + 1e-3f)
+    @Test fun cloudModelsFitTheirBox() {
+        // v0.1.4: the Tripo cumulus models, calibrated into the design's cloud box (any yaw: the xz diagonal stays in CLOUD_W)
+        for (c in ModelCalib.CLOUDS) {
+            val s = c.size
+            assertTrue("${c.id} $s", s.x <= Layout.CLOUD_W + 1e-3f && s.y <= Layout.CLOUD_H + 1e-3f && s.z <= Layout.CLOUD_D + 1e-3f)
         }
     }
 
@@ -97,14 +98,17 @@ class VolumeBoundsTest {
 
     private val winds = listOf(1f to 0f, -1f to 0f, 0f to 1f, 0f to -1f, 0.7071f to 0.7071f, -0.7071f to 0.7071f, 0.7071f to -0.7071f, -0.7071f to -0.7071f)
 
-    /** Every smoke puff box over a 4 s loop, all winds, wind levels 0..6. */
+    /** Every smoke wisp card box over one life, all winds, wind levels 0..6, plus the smoke curl model. */
     private fun puffBoxes(): List<Aabb> {
         val out = ArrayList<Aabb>()
-        for ((dx, dz) in winds) for (wl in 0..6) for (k in 0 until 40) for (i in 0 until Smoke.N) {
-            val (c, sc) = Smoke.puff(i, k * 0.1f, dx, dz, wl); out += Smoke.puffBounds(c, sc)
+        out += Smoke.curlBounds()
+        for ((dx, dz) in winds) for (wl in 0..6) for (k in 0 until 42) for (i in 0 until Smoke.N) {
+            out += Smoke.wispBounds(Smoke.wisp(i, k * 0.1f, dx, dz, wl))
         }
         return out
     }
+
+    @Test fun smokeInside() { for (b in puffBoxes()) assertTrue("smoke $b", b.inside(safe)) }
 
     @Test fun smokeYieldsToEveryTagAndTagsAreSeenWhole() {
         // q1-1 (QA #1): the chimney smoke crossed the house tag. Show that it did (so the rule is needed) ...
@@ -148,9 +152,11 @@ class VolumeBoundsTest {
 
     @Test fun triangleBudget() {
         val procedural = listOf(Pieces.plinth(), Pieces.ringBand(), Pieces.ringFace(), Pieces.pin(), Pieces.readoutCase(), Pieces.pointer(), Pieces.knob(), Pieces.vaneBase(), Pieces.vaneArrow(), Pieces.roofSnow()).sumOf { it.triangles } +
-            (0 until 6).sumOf { Pieces.cloud(17 + it * 31).triangles } + (0 until 4).sumOf { Pieces.rainSheet(3 + it).triangles + Pieces.snowSheet(5 + it).triangles } +
-            2 * Pieces.fogBand(91).triangles + 6 * Pieces.sphere(0.006f, 12, 8).triangles + 2 * Pieces.sphere(0.015f).triangles + 6 * Pieces.ripple().triangles
-        val models = ModelCalib.ALL.sumOf { it.triangles } + ModelCalib.ISLAND.triangles // + snow shell
+            (0 until 4).sumOf { Pieces.rainSheet(3 + it).triangles } + (Snowfall.MAX + Smoke.N + 1) * 2 + Pieces.shadeShell(Layout.MOON_R).triangles +
+            2 * Pieces.fogBand(91).triangles + 6 * Pieces.ripple().triangles
+        // v0.1.4 sky models: 6 clouds (3 shapes), sun, moon, smoke curl
+        val sky = (0 until 6).sumOf { ModelCalib.CLOUDS[it % 3].triangles } + ModelCalib.SUN.triangles + ModelCalib.MOON.triangles + ModelCalib.SMOKE_CURL.triangles
+        val models = ModelCalib.ALL.sumOf { it.triangles } + ModelCalib.ISLAND.triangles + sky // + snow shell
         println("TRIANGLES procedural=$procedural models=$models total=${procedural + models}")
         assertTrue("total ${procedural + models}", procedural + models <= 62_000 + 12_000) // the snow shell repeats the island (12 k), shown only with snow
     }

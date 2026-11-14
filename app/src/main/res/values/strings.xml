@@ -60,4 +60,5 @@
     <string name="step_fwd_desc">One hour later</string>
     <string name="strip_block">Jump to</string>
     <string name="strip_block_off">Past the forecast end</string>
+    <string name="howto_again">How it works</string>
 </resources>

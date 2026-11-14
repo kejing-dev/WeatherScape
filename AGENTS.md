@@ -1,6 +1,6 @@
 # 天气境 WeatherScape: project guidance
 
-A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.3.
+A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.4.
 Design contract: spatial-app-factory `apps/weather-scape/design-package.json` (v1.0, gate B passed 2026-11-12 with all
 defaults: turn the brass ring through 48 h + tap cloud / tree / house; Open-Meteo, CC BY, non-commercial; Shared Space,
 archetype A, 生产力; stone house A + birch + island A + lamp, procedural vane; no photos / immersive env (v2); 48 h only;
@@ -19,6 +19,21 @@ sound pool, board-input template); weather data, ring, scene and pages are new.
 - **Control window** (`WeatherScapeControl`, Planar 760 x 660 dp fixed (v0.1.2), `Placement.right(volume)`): native SpatialUI
   `TabBar`, three pages 天气 / 城市 / 设置; first run shows the how-to card on the weather page. No page scrolls.
   [退出应用] closes both containers, removes the tasks and ends the process. The app never reads the head pose.
+
+## v0.1.4 (gate C, user 11-14 on the headset: sun / moon / clouds / smoke / snow need their own models)
+- Sky models from Tripo (`~/Downloads/weather-scape-tripo/raw` -> `lod/` via the factory's `glb_decimate.py`), calibrated by
+  `tools/calibrate_models.py` into `ModelCalib.SUN / MOON / CLOUD_A..C / SMOKE_CURL` (fit boxes, bottom centre, OPAQUE):
+  sun 3.6 cm with rays (self-lit: emissiveTexture = base texture), turning slowly in its plane, plus an additive halo card;
+  crater moon 2.6 cm (self-lit 0.85) under an opaque dark half-shell turned by `domain/MoonPhase.kt` (slice date, sample day
+  = today); 6 clouds cycle 3 cumulus shapes (texture made neutral white with stretched fold shading, emissive = texture,
+  `WhiteLook.cloud` tints grey for overcast / rain / storm); a Tripo smoke curl on the chimney + 7 painted wisp cards
+  (`domain/Smoke.kt`: rise 7.5 cm in 4.2 s, grow 1.6 -> 5 cm, turn, fade; TRANSPARENT, one material each).
+- Snow: `domain/Snowfall.kt`, 36 six-armed crystal cards (`Tex.crystal`, MASKED cut-out), 9 per sheet, facing +Z, turning
+  0.25-0.7 rad/s, swaying down the leaning cylinder; a flake in front of a tag shrinks away (`Snowfall.yields`). The
+  snow sheets / octahedra and the sphere sun / moon / puffs / ball clouds are gone (`Pieces.cloud / snowSheet` removed).
+- Settings got [怎么玩 / How it works] (B19): shows the how-to card again (`WeatherFlow.showHowTo`).
+- Tests: `SkyModelsTest` (assets / calibration / emissive, moon phase vs. known dates, crystals inside + falling + turning,
+  snow yields to tags, wisps rise / grow / fade, card brightness); triangle budget 73.7 k of 74 k.
 
 ## v0.1.3 (QA #3 rework)
 - q3-1 search: `OpenMeteo.parseSearchMany` ranks big places (PPLC / PPLA / >= 1 M people) first, then exact names against

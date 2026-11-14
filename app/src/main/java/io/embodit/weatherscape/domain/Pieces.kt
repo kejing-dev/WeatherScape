@@ -7,8 +7,8 @@ import kotlin.random.Random
 
 /**
  * The procedural parts of the diorama (design entities3d / assets "程序化"): true-circle lathes with smooth normals for the
- * plinth, ring, knob and pin (B 圆部件 rule: >= 64 segments), merged-sphere cotton clouds, the four rain / snow sheets
- * (one merged mesh each, design budget: only 4 entities move), smoke puffs, sun / moon, the iron vane, the roof snow cap,
+ * plinth, ring, knob and pin (B 圆部件 rule: >= 64 segments), the four rain sheets (one merged mesh each),
+ * texture cards (snow crystals, smoke wisps, the sun's halo: v0.1.4, the sun / moon / clouds / smoke curl are Tripo models), the moon's phase shell, the iron vane, the roof snow cap,
  * the window / lamp glows and pond ripples. All opaque. Every piece is in its own local frame (documented per piece).
  */
 object Pieces {
@@ -116,20 +116,6 @@ object Pieces {
         return MeshData(pos, nor, m.uv, m.idx)
     }
 
-    /** One cotton cloud: 5-8 squashed spheres inside 0.14 x 0.06 x 0.10 (design clouds), origin = its centre. */
-    fun cloud(seed: Int): MeshData {
-        val rnd = Random(seed)
-        val n = 5 + rnd.nextInt(4)
-        val parts = (0 until n).map { i ->
-            val r = 0.017f + rnd.nextFloat() * 0.011f
-            val x = if (i == 0) 0f else (rnd.nextFloat() - 0.5f) * (Layout.CLOUD_W - 2 * r)
-            val z = if (i == 0) 0f else (rnd.nextFloat() - 0.5f) * (Layout.CLOUD_D - 2 * r)
-            val y = (rnd.nextFloat() - 0.3f) * 0.012f
-            transform(Shapes.sphere(V3.ZERO, r, 12, 8), Q4.ID, V3(x, y, z), V3(1f, 0.62f, 1f))
-        }
-        return Shapes.merge(parts)
-    }
-
     /**
      * Low fog (design: two opaque cotton bands near the ground). v0.1.1 (QA #1): one long squashed cloud read as a grey
      * floating board, so a band is now a loose arc of 9 small soft wisps (smooth ellipsoids, 2-3.6 cm) that hug the
@@ -188,32 +174,21 @@ object Pieces {
     fun rainStrands(seed: Int) = strands(seed, RAIN_STRANDS)
     fun snowStrands(seed: Int) = strands(seed + 50, SNOW_STRANDS)
 
-    /** A snow sheet: 12 strands x 5 = 60 white octahedra Ø 4 mm on the same lattice idea (0.08 m/s). */
-    fun snowSheet(seed: Int, skip: ((Float, Float, Float) -> Boolean)? = null): MeshData {
-        val h = Layout.PRECIP_Y1 - Layout.PRECIP_Y0 + Layout.SNOW_STEP
-        val parts = ArrayList<MeshData>()
-        val rnd = Random(seed * 13 + 5)
-        for ((x, z) in strands(seed + 50, SNOW_STRANDS)) {
-            var y = rnd.nextFloat() * Layout.SNOW_STEP
-            while (y + 0.004f <= h) {
-                val fx = x + (rnd.nextFloat() - 0.5f) * 0.01f; val fz = z + (rnd.nextFloat() - 0.5f) * 0.01f
-                if (skip?.invoke(fx, y, fz) != true) parts += octa(V3(fx, y, fz), 0.002f) // q3-2: flakes in front of a tag make way
-                y += Layout.SNOW_STEP
+    /**
+     * v0.1.4: the moon's phase shade, a hemisphere shell of radius [r] around +Z (pole at +Z, 24 x 8 segments, normals
+     * out, uv unused). The scene turns its pole away from the sun (MoonPhase.shadeTurn) so it darkens the night side.
+     */
+    fun shadeShell(r: Float, seg: Int = 24, rings: Int = 8): MeshData {
+        val b = MeshBuilder()
+        val idx = Array(rings + 1) { j ->
+            val th = (PI / 2).toFloat() * j / rings // 0 at the pole .. 90° at the rim
+            IntArray(seg + 1) { k ->
+                val ph = TAU * k / seg
+                val n = V3(sin(th) * cos(ph), sin(th) * sin(ph), cos(th))
+                b.v(n * r, n, k / seg.toFloat(), j / rings.toFloat())
             }
         }
-        if (parts.isEmpty()) parts += octa(V3.ZERO, 0.0001f) // never an empty mesh
-        return Shapes.merge(parts)
-    }
-
-    private fun octa(c: V3, r: Float): MeshData {
-        val b = MeshBuilder()
-        val pts = listOf(V3(r, 0f, 0f), V3(-r, 0f, 0f), V3(0f, r, 0f), V3(0f, -r, 0f), V3(0f, 0f, r), V3(0f, 0f, -r))
-        val faces = listOf(intArrayOf(0, 2, 4), intArrayOf(4, 2, 1), intArrayOf(1, 2, 5), intArrayOf(5, 2, 0), intArrayOf(4, 3, 0), intArrayOf(1, 3, 4), intArrayOf(5, 3, 1), intArrayOf(0, 3, 5))
-        for (f in faces) {
-            val a = pts[f[0]]; val bb = pts[f[1]]; val cc = pts[f[2]]
-            val n = (a + bb + cc).norm()
-            b.tri(b.v(c + a, n), b.v(c + bb, n), b.v(c + cc, n))
-        }
+        for (j in 0 until rings) for (k in 0 until seg) b.quad(idx[j][k], idx[j + 1][k], idx[j + 1][k + 1], idx[j][k + 1])
         return Shapes.fixWinding(b.build())
     }
 

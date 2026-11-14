@@ -444,6 +444,17 @@ class WeatherFlow(
         log("WELCOME done ($why) -> ${value.phase.id}")
     }
 
+    /**
+     * v0.1.4 (B19 / ui_gates how-to): [怎么玩] in Settings shows the how-to card again (same card as the first run,
+     * closed with [知道了]); the ring stays where it is.
+     */
+    fun showHowTo() {
+        touch()
+        welcomeShown = true
+        set { it.copy(phase = Phase.WELCOME, breathAt = upMs(), tag = null) }
+        log("WELCOME again (settings)")
+    }
+
     /** Debug "goto S01": the first-run card again. */
     fun debugWelcome() {
         onSettings(settings().copy(seenHowTo = false))

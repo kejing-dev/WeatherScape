@@ -23,6 +23,8 @@ import com.pico.spatial.core.math.Vector3
 import io.embodit.weatherscape.domain.Aabb
 import io.embodit.weatherscape.domain.Ask
 import io.embodit.weatherscape.domain.Layout
+import io.embodit.weatherscape.domain.MoonPhase
+import io.embodit.weatherscape.domain.Snowfall
 import io.embodit.weatherscape.domain.ModelCal
 import io.embodit.weatherscape.domain.ModelCalib
 import io.embodit.weatherscape.domain.Phase
@@ -127,7 +129,6 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         var lastBright = -1f
     }
     private val steps = listOf(StepBtn(Names.STEP_BACK, -1, Layout.STEP_BACK_C), StepBtn(Names.STEP_FWD, 1, Layout.STEP_FWD_C))
-    private var smokeMatRef: PhysicallyBasedMaterial? = null
     private var snowCoverMat: PhysicallyBasedMaterial? = null
     // models
     private var house: Entity? = null
@@ -141,10 +142,22 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
     private var sky: Entity? = null
     private val clouds = ArrayList<Entity>()
     private val cloudScale = FloatArray(6)
-    private var cloudMat: PhysicallyBasedMaterial? = null
+    /** v0.1.4: the Tripo cloud models' own materials (texture kept), coloured by WhiteLook. */
+    private val cloudMats = ArrayList<PhysicallyBasedMaterial>()
+    private val flakes = ArrayList<Entity>()
+    private val flakeK = FloatArray(Snowfall.MAX)
+    private var crystalMat: UnlitMaterial? = null
+    private val wispMats = ArrayList<UnlitMaterial>()
+    private var smokeCurl: Entity? = null
+    private val smokeMats = ArrayList<PhysicallyBasedMaterial>()
+    private var sunModel: Entity? = null
+    private val sunMats = ArrayList<PhysicallyBasedMaterial>()
+    private var halo: Entity? = null
+    private var haloMat: UnlitMaterial? = null
+    private var moonShade: Entity? = null
+    private var moonAge = -1.0
     private val fogBands = ArrayList<Entity>()
     private val rain = ArrayList<Entity>()
-    private val snow = ArrayList<Entity>()
     private val smoke = ArrayList<Entity>()
     // q3-2: rain / snow sheets with the strands in front of the current tag left out (built when a tag goes up)
     private var rainMatRef: PhysicallyBasedMaterial? = null
@@ -154,7 +167,6 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
     private var holeBusy = false
     private val ripples = ArrayList<Entity>()
     private var sun: Entity? = null
-    private var sunMat: UnlitMaterial? = null
     private var moon: Entity? = null
     private var light: Entity? = null
     private var lightC: DirectionalLightComponent? = null
@@ -172,7 +184,6 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
     private var glow = 0f
     private var snowCur = 0f
     private var smokeK = 0f
-    private var snowFlakeMat: PhysicallyBasedMaterial? = null
     private var fogMatRef: PhysicallyBasedMaterial? = null
     private var ampCur = 1f
     private var vaneYaw = 0f
@@ -219,13 +230,14 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
                 val stepBody = async(io) { Kit.mesh(Pieces.stepButton(), "stepBody").kept() }
                 val stepFace = async(io) { Kit.mesh(Pieces.disc(Layout.STEP_FACE_R), "stepFace").kept() }
                 val stepBox = async(io) { ShapeResource.createBox(Vector3(Layout.STEP_HIT, Layout.STEP_HIT, 0.03f)).kept() }
-                val clouds = async(io) { (0 until 6).map { Kit.mesh(Pieces.cloud(17 + it * 31), "cloud$it").kept() } }
                 val fog = async(io) { (0 until 2).map { Kit.mesh(Pieces.fogBand(91 + it * 7), "fog$it").kept() } }
                 val rain = async(io) { (0 until 4).map { Kit.mesh(Pieces.rainSheet(3 + it), "rain$it").kept() } }
-                val snow = async(io) { (0 until 4).map { Kit.mesh(Pieces.snowSheet(5 + it), "snow$it").kept() } }
-                val puff = async(io) { Kit.mesh(Pieces.sphere(0.006f, 12, 8), "puff").kept() }
-                val sun = async(io) { Kit.mesh(Pieces.sphere(Layout.SUN_R), "sun").kept() }
-                val moon = async(io) { Kit.mesh(Pieces.sphere(Layout.MOON_R), "moon").kept() }
+                // v0.1.4: texture cards (1 x 1 m, scaled per use) for the snow crystals, smoke wisps and the sun's halo
+                val card = async(io) { Kit.mesh(Pieces.quad(1f, 1f), "textureCard").kept() }
+                val shade = async(io) { Kit.mesh(Pieces.shadeShell(Layout.MOON_R * Layout.MOON_SHADE_K), "moonPhaseShell").kept() }
+                val crystalTex = async(io) { TextureResource.create(Tex.crystal()).kept() }
+                val wispTex = async(io) { (0 until 3).map { TextureResource.create(Tex.wisp(11 + it * 7)).kept() } }
+                val haloTex = async(io) { TextureResource.create(Tex.halo()).kept() }
                 val ripple = async(io) { Kit.mesh(Pieces.ripple(), "ripple").kept() }
                 val tagQuad = async(io) { Kit.mesh(Pieces.quad(Layout.TAG_W, Layout.TAG_H), "tag").kept() }
                 val physics = async(io) { PhysicsMaterialResource().kept() }
@@ -251,13 +263,13 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
             val stepBody = d.stepBody.getCompleted()
             val stepFace = d.stepFace.getCompleted()
             val stepBox = d.stepBox.getCompleted()
-            val clouds = d.clouds.getCompleted()
             val fog = d.fog.getCompleted()
             val rain = d.rain.getCompleted()
-            val snow = d.snow.getCompleted()
-            val puff = d.puff.getCompleted()
-            val sun = d.sun.getCompleted()
-            val moon = d.moon.getCompleted()
+            val card = d.card.getCompleted()
+            val shade = d.shade.getCompleted()
+            val crystalTex = d.crystalTex.getCompleted()
+            val wispTex = d.wispTex.getCompleted()
+            val haloTex = d.haloTex.getCompleted()
             val ripple = d.ripple.getCompleted()
             val tagQuad = d.tagQuad.getCompleted()
             val physics = d.physics.getCompleted()
@@ -310,9 +322,8 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
             b.holder = hld; b.body = body; b.bodyMat = bodyMat; b.faceMat = faceMat
         }
         // sky
-        cloudMat = Kit.pbr(WhiteLook.CLOUD[0], 1f).kept()
+        // v0.1.4: the clouds are Tripo cumulus models, added under the sky holder in installModels
         val s = Entity().apply { setName(Names.SKY) }
-        for (i in 0 until 6) clouds += model(m.clouds[i], cloudMat!!, "cloud$i").also { it.enabled = false; s.addChild(it) }
         holder(s, listOf(m.skyBox), m.physics)
         root.addChild(s); sky = s
         // fog (v0.1.1): two loose rings of soft pale wisps around the island rim, turning slowly in opposite directions
@@ -320,21 +331,27 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         fogBands += model(m.fog[0], fogMat, "fog0", V3(0f, FOG_Y[0], 0f)).also { it.enabled = false; root.addChild(it) }
         fogBands += model(m.fog[1], fogMat, "fog1", V3(0f, FOG_Y[1], 0f), Q4.axis(V3.UP, 2.6f)).also { it.enabled = false; root.addChild(it) }
         val rainMat = Kit.pbr(0xB7C6D3, 0.4f, cull = false).kept().also { dimmable += it to 0xB7C6D3; rainMatRef = it }
-        // flakes (v0.1.1, QA #1 "dark dots in front of a bright wall"): 4 mm octahedra show their shaded underside, so they
-        // also carry a white emissive that follows the scene brightness (never below 0.6): white from every side
-        val snowMat = Kit.pbr(WhiteLook.FLAKE, 0.9f).kept().also { snowFlakeMat = it }
-        for (i in 0 until 4) {
-            rain += model(m.rain[i], rainMat, "rain$i").also { it.enabled = false; root.addChild(it) }
-            snow += model(m.snow[i], snowMat, "snow$i").also { it.enabled = false; root.addChild(it) }
+        for (i in 0 until 4) rain += model(m.rain[i], rainMat, "rain$i").also { it.enabled = false; root.addChild(it) }
+        // v0.1.4 (user 11-14 "❄️也是"): six-armed crystal cards facing the user, turning slowly as they fall (Snowfall);
+        // unlit white x the painted crystal's alpha, dimmed with the scene but never below 0.6 (B24)
+        crystalMat = Tex.cardMat(m.crystalTex, mode = com.pico.spatial.core.ecs.resource.BlendingMode.MASKED).kept() // cut-out, opaque pass (M8)
+        for (i in 0 until Snowfall.MAX) flakes += model(m.card, crystalMat!!, "snowCrystal$i").also { it.enabled = false; root.addChild(it) } // gate:allow primitive-hero textured crystal card (painted six-armed snow crystal with alpha), the brief's "带 alpha 的结晶贴图片"
+        // v0.1.4 (user 11-14 "烟都要有自己的模型"): smoke wisps = semi-transparent painted smoke cards rising from the Tripo
+        // smoke curl on the chimney; each wisp has its own material for its fade
+        for (i in 0 until Smoke.N) {
+            val mat = Tex.cardMat(m.wispTex[i % 3], WhiteLook.SMOKE, 0f).kept()
+            wispMats += mat
+            smoke += model(m.card, mat, "smokeWisp$i").also { it.enabled = false; root.addChild(it) } // gate:allow primitive-hero textured smoke-wisp card (painted wisp with alpha) rising from the Tripo smoke model
         }
-        // v0.1.2 (B24, user 11-13 "烟囱的烟也是"黑的): smoke is white like the clouds, an emissive base under the PBR
-        val smokeMat = Kit.pbr(WhiteLook.SMOKE, 1f).kept().also { smokeMatRef = it }
-        for (i in 0 until 6) smoke += model(m.puff, smokeMat, "smoke$i").also { it.enabled = false; root.addChild(it) }
         val rippleMat = Kit.pbr(0x9DB2C2, 0.15f).kept().also { dimmable += it to 0x9DB2C2 }
         for (i in 0 until 6) ripples += model(m.ripple, rippleMat, "ripple$i").also { it.enabled = false; root.addChild(it) }
-        sunMat = Kit.unlit(0xFFF2C8).kept()
-        sun = model(m.sun, sunMat!!, "sun").also { it.enabled = false; root.addChild(it) }
-        moon = model(m.moon, Kit.unlit(0xDFE6EF).kept(), "moon").also { it.enabled = false; root.addChild(it) }
+        // v0.1.4: sun / moon holders; the Tripo sun (glowing, rays) and the crater moon go in under them in installModels.
+        // The sun has a soft halo card behind it; the moon a dark phase shell over its night side (MoonPhase).
+        haloMat = Tex.cardMat(m.haloTex, 0xFFFFFF, 0.9f, com.pico.spatial.core.ecs.resource.BlendingMode.ADD).kept() // additive glow
+        sun = Entity().apply { setName("sun"); enabled = false }.also { root.addChild(it) }
+        halo = model(m.card, haloMat!!, "sunHalo", V3(0f, 0f, -0.006f)).also { it.scale(2 * Layout.SUN_R, 2 * Layout.SUN_R, 1f); sun!!.addChild(it) } // gate:allow primitive-hero the sun's soft halo, a painted glow texture behind the Tripo sun model
+        moon = Entity().apply { setName("moon"); enabled = false }.also { root.addChild(it) }
+        moonShade = model(m.shade, Kit.unlit(0x1A1F2A).kept(), "moonPhaseShell").also { moon!!.addChild(it) } // opaque night side (M8)
         tagMat = Kit.unlit(0xFFFFFF).kept()
         tag = model(m.tagQuad, tagMat!!, "tagPlate").also { it.enabled = false; root.addChild(it) }
         runCatching {
@@ -348,21 +365,22 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         Log.i(TAG, "SCENE basics in ${SystemClock.elapsedRealtime() - tStart} ms")
     }
 
-    private fun calibrated(cal: ModelCal, tpl: Entity): Entity {
+    /** [into]: where the clone's GLB materials go (the dimmed scenery by default; clouds / sun / smoke keep their own looks). */
+    private fun calibrated(cal: ModelCal, tpl: Entity, into: MutableList<PhysicallyBasedMaterial> = glbMats): Entity {
         val node = Entity().apply { setName("cal:${cal.id}") }
         node.at(cal.offset)
         node.scale(cal.scale, cal.scaleY, cal.scale)
         val c = clone(tpl)
         node.addChild(c)
-        collectGlbMats(c)
+        collectGlbMats(c, into)
         return node
     }
 
-    private fun collectGlbMats(e: Entity) {
+    private fun collectGlbMats(e: Entity, into: MutableList<PhysicallyBasedMaterial> = glbMats) {
         e.components[ModelComponent::class.java]?.let { mc ->
-            for (i in 0 until mc.materials.size) runCatching { (mc.materials.get(i) as? PhysicallyBasedMaterial)?.let { if (it !in glbMats) glbMats += it } }
+            for (i in 0 until mc.materials.size) runCatching { (mc.materials.get(i) as? PhysicallyBasedMaterial)?.let { if (it !in into) into += it } }
         }
-        e.getChildren().forEach { collectGlbMats(it) }
+        e.getChildren().forEach { collectGlbMats(it, into) }
     }
 
     private fun setAllMaterials(e: Entity, mat: Material) {
@@ -374,6 +392,9 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
     suspend fun installModels(load: suspend (String) -> Entity) {
         val tStart = SystemClock.elapsedRealtime()
         val island = load("island"); val islandSnow = load("island_snow"); val houseT = load("house"); val treeT = load("tree"); val lampT = load("lamp")
+        // v0.1.4 (B12, user 11-14): the sky's own Tripo models
+        val sunT = load("sun"); val moonT = load("moon"); val curlT = load("smoke_curl")
+        val cloudT = ModelCalib.CLOUDS.map { load(it.id) }
         val io = Dispatchers.IO
         val m = withContext(io) {
             object {
@@ -422,6 +443,26 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         bulbMat = Kit.unlit(0x3A3630).kept()
         l.addChild(model(m.bulb, bulbMat!!, "bulb", V3(0f, ModelCalib.LAMP.size.y * 0.82f, 0f)))
         root.addChild(l)
+        // v0.1.4 sky models: 6 clouds cycling the 3 cumulus shapes (each turned differently), the glowing sun with its rays
+        // facing the user, the crater moon under its phase shell, the smoke curl on the chimney mouth
+        val skyHolder = sky!!
+        for (i in 0 until 6) {
+            val cal = ModelCalib.CLOUDS[i % ModelCalib.CLOUDS.size]
+            val e = Entity().apply { setName("cloud$i"); enabled = false }
+            val turn = Entity().apply { at(V3.ZERO, Q4.axis(V3.UP, CLOUD_YAW[i])) }
+            // the calibration puts the bottom centre on the origin; lift by half the height so the entity sits at its centre
+            turn.addChild(calibrated(cal, cloudT[i % cloudT.size], cloudMats).also { it.at(cal.offset - V3(0f, cal.size.y / 2, 0f)) })
+            e.addChild(turn)
+            skyHolder.addChild(e)
+            clouds += e
+        }
+        sunModel = calibrated(ModelCalib.SUN, sunT, sunMats).also { it.at(ModelCalib.SUN.offset - V3(0f, ModelCalib.SUN.size.y / 2, 0f)) }
+        sun!!.addChild(Entity().apply { setName("sunSpin"); addChild(sunModel!!) }.also { sunModel = it })
+        moon!!.addChild(calibrated(ModelCalib.MOON, moonT, ArrayList()).also { it.at(ModelCalib.MOON.offset - V3(0f, ModelCalib.MOON.size.y / 2, 0f)) })
+        smokeCurl = Entity().apply { setName("smokeCurl"); enabled = false }
+        smokeCurl!!.addChild(calibrated(ModelCalib.SMOKE_CURL, curlT, smokeMats))
+        root.addChild(smokeCurl!!)
+        lastCloudKey = -1
         Log.i(TAG, "SCENE models in ${SystemClock.elapsedRealtime() - tStart} ms, GLB materials ${glbMats.size}")
         modelsBuilt = true
         lastBright = -1f
@@ -542,9 +583,11 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
             lastBright = p.brightness
             for ((mat, rgb) in dimmable) mat.setBaseColor(rgb4(rgb, p.brightness))
             // B24 whites: base dimmed with the scene, emissive >= 40 % of the colour (WhiteLook, ControlsTest)
-            applyWhite(snowFlakeMat, WhiteLook.look(WhiteLook.FLAKE, p.brightness))
             applyWhite(fogMatRef, WhiteLook.look(WhiteLook.FOG, p.brightness))
-            applyWhite(smokeMatRef, WhiteLook.look(WhiteLook.SMOKE, p.brightness))
+            // v0.1.4: crystals / wisps are unlit cards: white x the scene brightness, never below WhiteLook.CARD_MIN (B24)
+            crystalMat?.setBaseColor(rgb4(WhiteLook.FLAKE, WhiteLook.crystalK(p.brightness)))
+            wispMats.forEach { it.setBaseColor(rgb4(WhiteLook.SMOKE, WhiteLook.cardK(p.brightness))) }
+            smokeMats.forEach { applyWhite(it, WhiteLook.look(WhiteLook.SMOKE, p.brightness)) }
             snowCoverMat?.let { val e = WhiteLook.emissiveK(p.brightness) * 0.5f; it.setEmissiveColor(Color4(0.96f * e, 0.965f * e, 0.97f * e, 1f)) }
             val g = Color4(p.brightness, p.brightness, p.brightness, 1f)
             for (mat in glbMats) runCatching { mat.setBaseColor(g) }
@@ -563,10 +606,9 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
             // v0.1.2 (B24, user 11-13 "云怎么是黑的，应该是白云啊"): light greys only, with an emissive base so the PBR light
             // in a Shared Space volume can't turn them dark; the storm flash lights them bluish white
             val look = WhiteLook.cloud(p.cloudShade, p.brightness)
-            applyWhite(cloudMat, look)
-            if (flash) cloudMat?.setEmissiveColor(Color4(0.95f, 0.98f, 1.1f, 1f))
+            for (cm in cloudMats) { applyWhite(cm, look); if (flash) cm.setEmissiveColor(Color4(0.95f, 0.98f, 1.1f, 1f)) }
         }
-        for (i in 0 until 6) {
+        for (i in 0 until clouds.size) {
             cloudScale[i] = approach(cloudScale[i], if (i < p.clouds) 1f else 0f, dt, 0.27f)
             val (cp, edge) = SceneModel.cloudPos(i, t, p.drift, p.downX, p.downZ)
             val s = cloudScale[i] * edge
@@ -590,23 +632,31 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         val holesReady = wantHole != null && wantHole == holeKey && !holeBusy
         for (i in 0 until 4) {
             val onR = p.precip == Precip.RAIN && i < p.sheets
-            val onS = p.precip == Precip.SNOW && i < p.sheets
-            rain[i].enabled = onR && wantHole == null; snow[i].enabled = onS && wantHole == null
+            rain[i].enabled = onR && wantHole == null
             val hole = if (holesReady) holeSheets.getOrNull(i) else null
-            hole?.enabled = onR || onS
+            hole?.enabled = onR
             if (onR) {
                 val off = ((t * 0.6f + i * 0.0125f) % Layout.RAIN_STEP)
                 val at = V3(0f, Layout.PRECIP_Y0, 0f) + tiltQ.rotate(V3(0f, -off, 0f))
                 rain[i].at(at, tiltQ); hole?.at(at, tiltQ)
             }
-            if (onS) {
-                val off = ((t * 0.08f + i * 0.0125f) % Layout.SNOW_STEP)
-                val sway = V3(0.004f * sin(t * 1.3f + i), 0f, 0.004f * kotlin.math.cos(t * 1.1f + i))
-                val at = V3(0f, Layout.PRECIP_Y0, 0f) + tiltQ.rotate(V3(0f, -off, 0f)) + sway
-                snow[i].at(at, tiltQ); hole?.at(at, tiltQ)
-            }
         }
         if (!holesReady) holeSheets.forEach { it.enabled = false }
+        // v0.1.4 snow: crystal cards facing the user, turning slowly in their plane, swaying down the leaning cylinder;
+        // flakes in front of an ask tag shrink away while it is up (Snowfall.yields, q3-2)
+        val nFlakes = if (p.precip == Precip.SNOW) Snowfall.count(p.sheets) else 0
+        val tagBoxUp = tgUp?.let { tagBox(it.kind) }
+        for (i in 0 until flakes.size) {
+            val e = flakes[i]
+            if (i >= nFlakes) { flakeK[i] = 0f; e.enabled = false; continue }
+            val fp = Snowfall.pose(i, if (reduced) t * 0.5f else t)
+            val w = Snowfall.world(fp, tiltQ)
+            val want = if (tagBoxUp != null && Snowfall.yields(w, tagBoxUp)) 0f else 1f
+            flakeK[i] = if (want == 0f) approach(flakeK[i], 0f, dt, 0.03f) else approach(flakeK[i], 1f, dt, 0.15f)
+            val sz = fp.size * flakeK[i]
+            e.enabled = sz > 0.0008f
+            if (e.enabled) { e.at(w, Q4.axis(V3(0f, 0f, 1f), fp.turn)); e.scale(sz, sz, 1f) }
+        }
 
         if (!modelsBuilt) return
         // tree: sway about the root toward downwind (amplitude by wind level, 1 s change)
@@ -622,13 +672,19 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         vaneYaw += vaneVel * dt
         vaneArrow?.at(VANE_FOOT + V3(0f, 0.024f, 0f), Q4.axis(V3.UP, vaneYaw))
         // smoke from the chimney (feels < 12°, dry), leaning downwind; it makes way for any ask tag (q1-1, Smoke)
+        // v0.1.4: the Tripo smoke curl sits on the chimney mouth (sways a little), wisp cards rise from it and fade out
         smokeK = approach(smokeK, Smoke.target(p.smoke, st.tag != null), dt, Smoke.FADE_TAU)
+        smokeCurl?.let { c ->
+            c.enabled = smokeK > 0.02f
+            if (c.enabled) c.at(Smoke.SOURCE, Q4.axis(V3.UP, 0.4f * sin(t * 0.7f)) * Q4.axis(V3(-p.downZ, 0f, p.downX).let { if (it.length < 1e-4f) V3(1f, 0f, 0f) else it }, Layout.deg(6f + 2f * p.windLevel)), smokeK)
+        }
         for (i in 0 until Smoke.N) {
             val e = smoke[i]
             e.enabled = smokeK > 0.02f
             if (!e.enabled) continue
-            val (c, sc) = Smoke.puff(i, t, p.downX, p.downZ, p.windLevel)
-            e.at(c, null, sc * smokeK)
+            val w = Smoke.wisp(i, t, p.downX, p.downZ, p.windLevel)
+            wispMats[i].setOpacity(w.alpha * smokeK)
+            e.at(w.c, Q4.axis(V3(0f, 0f, 1f), w.spin)); e.scale(w.size * smokeK, w.size * smokeK, 1f)
         }
         // night glows: windows and the lamp bulb (0.8 s)
         glow = approach(glow, if (p.isDay) 0f else 1f, dt, 0.27f)
@@ -636,10 +692,28 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         windowMats.forEach { it.setBaseColor(win) }
         bulbMat?.setBaseColor(rgb4(lerpRgb(0x3A3630, 0xFFD28A, glow)))
         // sun / moon on the arc
+        // v0.1.4 sun: the Tripo sun (self-lit texture) turns slowly in its plane, its halo breathes; dimmer behind cloud
         sun?.enabled = p.sunUp
-        if (p.sunUp) { sun?.at(p.sunPos); sunMat?.setBaseColor(rgb4(0xFFF2C8, if (p.sunDim) 0.55f else 1f)) }
+        if (p.sunUp) {
+            sun?.at(p.sunPos)
+            sunModel?.at(V3.ZERO, Q4.axis(V3(0f, 0f, 1f), if (reduced) 0f else -0.08f * t))
+            val k = if (p.sunDim) 0.6f else 1f
+            sunMats.forEach { it.setBaseColor(Color4(k, k, k, 1f)); it.setEmissiveColor(Color4(k, k, k, 1f)) }
+            haloMat?.setOpacity((if (p.sunDim) 0.45f else 0.9f) * (1f + if (reduced) 0f else 0.06f * sin(t * 1.6f)).coerceAtMost(1f))
+        }
+        // moon: the crater model under its phase shell, turned for the slice hour's moon age (MoonPhase)
         moon?.enabled = p.moonUp
-        if (p.moonUp) moon?.at(p.moonPos)
+        if (p.moonUp) {
+            moon?.at(p.moonPos)
+            // the slice hour's local date; the built-in sample day ("D1 07:00") uses today's date
+            val days = MoonPhase.epochDays(st.slice.at(p.hour).time) ?: (System.currentTimeMillis() / 86_400_000.0 + p.hour / 24.0)
+            val age = MoonPhase.age(days)
+            if (kotlin.math.abs(age - moonAge) > 0.02) {
+                moonAge = age
+                moonShade?.at(V3.ZERO, MoonPhase.shadeTurn(age))
+                Log.i(TAG, "MOON age %.1f d, lit %.0f %%".format(age, 100 * MoonPhase.illumination(age)))
+            }
+        }
         // snow cover (1 s)
         snowCur = approach(snowCur, p.snowDepth, dt, 0.33f)
         snowIsland?.let { si -> si.enabled = snowCur > 0.02f; if (si.enabled) si.at(V3(0f, ModelCalib.ISLAND_BOTTOM + 0.004f * snowCur, 0f)) }
@@ -680,17 +754,18 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         if (holeBusy) return
         holeBusy = true
         holeKey = key
-        val rainy = precip == Precip.RAIN
+        if (precip != Precip.RAIN) { holeKey = key; return } // v0.1.4: snow yields flake by flake (Snowfall.yields)
+        val rainy = true
         val box = tagBox(kind)
-        val mat: Material? = if (rainy) rainMatRef else snowFlakeMat
+        val mat: Material? = rainMatRef
         scope.launch {
             var kept = 0; var full = 0
             val meshes = withContext(Dispatchers.IO) {
                 runCatching {
                     (0 until sheets.coerceAtMost(4)).map { i ->
-                        val data = if (rainy) Pieces.rainSheet(3 + i, PrecipYield.rainSkip(tiltQ, box)) else Pieces.snowSheet(5 + i, PrecipYield.snowSkip(tiltQ, box))
-                        kept += data.vertexCount; full += (if (rainy) Pieces.rainSheet(3 + i) else Pieces.snowSheet(5 + i)).vertexCount
-                        Kit.mesh(data, if (rainy) "rainHole$i" else "snowHole$i")
+                        val data = Pieces.rainSheet(3 + i, PrecipYield.rainSkip(tiltQ, box))
+                        kept += data.vertexCount; full += Pieces.rainSheet(3 + i).vertexCount
+                        Kit.mesh(data, "rainHole$i")
                     }
                 }.onFailure { Log.w(TAG, "HOLES $key: $it") }.getOrNull()
             }
@@ -759,6 +834,8 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
     companion object {
         /** House-local (calibrated, origin = bottom centre): the ridge foot of the vane at the end away from the chimney. */
         val VANE_FOOT = V3(0f, 0.0725f, -0.026f)
+        /** v0.1.4: each cloud's turn about the vertical, so the 3 Tripo shapes never look repeated. */
+        val CLOUD_YAW = floatArrayOf(0f, 0.5f, -0.35f, 2.9f, 3.5f, 2.6f)
         /** Fog wisp ring heights (scene y): just above the grass, under the house eaves. */
         val FOG_Y = floatArrayOf(-0.150f, -0.137f)
         /** Night window glows (position, turn): front gable window and two on the left wall (estimated from the model, ui-audit shots). */

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v0.1.4: the how-to lines again under an explicit English locale (values/ is already English; ui_gates how-to looks in values-en). -->
+<resources>
+    <string name="howto_title">How it works</string>
+    <string name="howto_1">This is the sky over your town right now.</string>
+    <string name="howto_2">The ◀ ▶ beside the ring work too. Or pinch / hold the trigger on the ring and turn it right.</string>
+    <string name="howto_3">Tap the clouds, the tree or the house to ask.</string>
+    <string name="howto_strip">Tap a time block to jump there. ◀ ▶ move one hour.</string>
+    <string name="howto_again">How it works</string>
+</resources>

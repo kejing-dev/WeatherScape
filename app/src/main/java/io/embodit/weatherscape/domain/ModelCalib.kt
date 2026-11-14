@@ -15,6 +15,20 @@ object ModelCalib {
     val TREE = ModelCal("tree", "tree-B-birch.glb", V3(-0.37167f, -0.00179f, -0.38334f), V3(0.37897f, 0.98132f, 0.38433f), 0.142406f, 0.142406f, V3(0.00365f, -0.00179f, 0.00049f), 9998)
     val LAMP = ModelCal("lamp", "lamp-A.glb", V3(-0.09176f, 0.00156f, -0.10824f), V3(0.09167f, 0.97629f, 0.10703f), 0.082074f, 0.082074f, V3(-0.00005f, 0.00156f, -0.00061f), 2000)
     val ALL = listOf(ISLAND, HOUSE, TREE, LAMP)
+    /** v0.1.4 sky model sun (Tripo sun.glb, fit (0.036, 0.036, 0.036) m, 3000 triangles). */
+    val SUN = ModelCal("sun", "sun.glb", V3(-0.49197f, -0.00277f, -0.24031f), V3(0.49090f, 0.98397f, 0.24000f), 0.036484f, 0.036484f, V3(-0.00053f, -0.00277f, -0.00016f), 3000)
+    /** v0.1.4 sky model moon (Tripo moon.glb, fit (0.026, 0.026, 0.026) m, 2000 triangles). */
+    val MOON = ModelCal("moon", "moon.glb", V3(-0.48858f, 0.00183f, -0.49130f), V3(0.48534f, 0.97728f, 0.47750f), 0.026654f, 0.026654f, V3(-0.00162f, 0.00183f, -0.00690f), 2000)
+    /** v0.1.4 sky model cloud_a (Tripo cloud_round.glb, fit (0.14, 0.07, 0.1) m, 1800 triangles). */
+    val CLOUD_A = ModelCal("cloud_a", "cloud_round.glb", V3(-0.48804f, -0.00131f, -0.39051f), V3(0.49159f, 0.57660f, 0.39044f), 0.121125f, 0.121125f, V3(0.00177f, -0.00131f, -0.00004f), 1800)
+    /** v0.1.4 sky model cloud_b (Tripo cloud_long.glb, fit (0.14, 0.07, 0.1) m, 1800 triangles). */
+    val CLOUD_B = ModelCal("cloud_b", "cloud_long.glb", V3(-0.49229f, -0.00001f, -0.19284f), V3(0.49279f, 0.41723f, 0.19638f), 0.142121f, 0.142121f, V3(0.00025f, -0.00001f, 0.00177f), 1800)
+    /** v0.1.4 sky model cloud_c (Tripo cloud_puffy.glb, fit (0.14, 0.07, 0.1) m, 1800 triangles). */
+    val CLOUD_C = ModelCal("cloud_c", "cloud_puffy.glb", V3(-0.48884f, -0.00076f, -0.41151f), V3(0.48385f, 0.62933f, 0.40789f), 0.111095f, 0.111095f, V3(-0.00249f, -0.00076f, -0.00181f), 1800)
+    /** v0.1.4 sky model smoke_curl (Tripo smoke_cut.glb, fit (0.03, 0.024, 0.03) m, 1592 triangles). */
+    val SMOKE_CURL = ModelCal("smoke_curl", "smoke_cut.glb", V3(-0.34178f, 0.24006f, -0.28244f), V3(0.34054f, 0.97941f, 0.21093f), 0.032461f, 0.032461f, V3(-0.00062f, 0.24006f, -0.03576f), 1592)
+    val CLOUDS = listOf(CLOUD_A, CLOUD_B, CLOUD_C)
+    val SKY = listOf(SUN, MOON, CLOUD_A, CLOUD_B, CLOUD_C, SMOKE_CURL)
     /** Island bottom (scene y): the plinth top -0.19, sunk 1.2 cm. */
     const val ISLAND_BOTTOM = -0.2020f
     /** Highest island point (scene y), design -0.155. */

@@ -15,6 +15,7 @@ import com.pico.spatial.core.ecs.resource.MaterialCullingMode
 import com.pico.spatial.core.ecs.resource.MeshModel
 import com.pico.spatial.core.ecs.resource.MeshResource
 import com.pico.spatial.core.ecs.resource.PhysicallyBasedMaterial
+import com.pico.spatial.core.ecs.resource.TextureResource
 import com.pico.spatial.core.ecs.resource.UnlitMaterial
 import com.pico.spatial.core.math.Color4
 import com.pico.spatial.core.math.Quat
@@ -234,6 +235,86 @@ internal object Tex {
         if (testF) { p.textSize = 40f; c.drawText("F↑", n / 2f, n * 0.18f, p) }
         return bmp
     }
+
+    /**
+     * v0.1.4 (user 11-14 "❄️也是" white blobs): one six-armed snow crystal, white on transparent, 256 x 256 for a 1.0 -
+     * 1.4 cm card. Each arm has a thick stem, two pairs of side branches and a small tip fork; a hexagonal plate in the
+     * middle and a faint blue-grey edge so the shape reads against the white clouds and the snow-covered island.
+     */
+    fun crystal(): Bitmap {
+        val n = 256
+        val bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val cx = n / 2f; val r = n * 0.46f
+        fun arms(p: Paint, w: Float) {
+            p.strokeWidth = w
+            for (k in 0 until 6) {
+                c.save(); c.rotate(60f * k, cx, cx)
+                c.drawLine(cx, cx, cx, cx - r, p)
+                for ((at, len) in listOf(0.38f to 0.30f, 0.62f to 0.24f, 0.84f to 0.12f)) {
+                    val y = cx - r * at; val l = r * len
+                    c.drawLine(cx, y, cx - l * 0.82f, y - l * 0.57f, p)
+                    c.drawLine(cx, y, cx + l * 0.82f, y - l * 0.57f, p)
+                }
+                c.restore()
+            }
+            val hex = android.graphics.Path()
+            for (k in 0 until 6) { val a = Math.toRadians(60.0 * k + 30).toFloat(); val x = cx + r * 0.20f * cos(a); val y = cx + r * 0.20f * sin(a); if (k == 0) hex.moveTo(x, y) else hex.lineTo(x, y) }
+            hex.close()
+            c.drawPath(hex, p)
+        }
+        val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xB04E6478.toInt(); style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+        arms(edge, 30f)
+        val ice = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+        arms(ice, 17f)
+        ice.style = Paint.Style.FILL
+        c.drawCircle(cx, cx, r * 0.13f, ice)
+        return bmp
+    }
+
+    /**
+     * v0.1.4: one soft smoke wisp, 256 x 256, white with alpha: a few overlapping soft blobs along a little curl, densest
+     * in the middle, fading to nothing at the card edge (no visible square). [seed] varies the shape.
+     */
+    fun wisp(seed: Int): Bitmap {
+        val n = 256
+        val bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val rnd = Random(seed)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        repeat(9) { k ->
+            val t = k / 8f
+            val x = n / 2f + n * 0.16f * sin(t * 5f + seed) + (rnd.nextFloat() - 0.5f) * n * 0.08f
+            val y = n * (0.72f - 0.44f * t) + (rnd.nextFloat() - 0.5f) * n * 0.06f
+            val rr = n * (0.14f + 0.10f * rnd.nextFloat())
+            p.shader = android.graphics.RadialGradient(x, y, rr, intArrayOf(0x99FFFFFF.toInt(), 0x44FFFFFF, 0x00FFFFFF), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+            c.drawCircle(x, y, rr, p)
+        }
+        return bmp
+    }
+
+    /** v0.1.4: the sun's soft halo, 256 x 256: warm white core fading through gold to transparent at the edge. */
+    fun halo(): Bitmap {
+        val n = 256
+        val bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.RadialGradient(n / 2f, n / 2f, n / 2f, intArrayOf(0xCCFFE7A6.toInt(), 0x88FFC861.toInt(), 0x33FFB040, 0x00FFA830), floatArrayOf(0f, 0.38f, 0.7f, 1f), Shader.TileMode.CLAMP)
+        }
+        c.drawCircle(n / 2f, n / 2f, n / 2f, p)
+        return bmp
+    }
+
+    /**
+     * Unlit material for a texture card: base colour x texture. [mode]: MASKED = alpha cut-out at 0.5, drawn in the opaque
+     * pass (snow crystals, M8); TRANSPARENT = blended with [opacity] (smoke wisps fade out); ADD = additive glow (sun halo).
+     */
+    fun cardMat(tex: TextureResource, rgb: Int = 0xFFFFFF, opacity: Float = 1f, mode: BlendingMode = BlendingMode.TRANSPARENT): UnlitMaterial =
+        UnlitMaterial.create(mode).apply {
+            setBaseColor(rgb4(rgb)); setBaseColorTexture(tex)
+            if (mode == BlendingMode.MASKED) setOpacityThreshold(0.5f) else setOpacity(opacity)
+            setCullingMode(MaterialCullingMode.NONE); setApplyToneMapping(false)
+        }
 
     @Suppress("unused") private fun unused() = cos(0f)
 }

@@ -60,4 +60,5 @@
     <string name="step_fwd_desc">往后 1 小时</string>
     <string name="strip_block">跳到</string>
     <string name="strip_block_off">这段已过预报末尾</string>
+    <string name="howto_again">怎么玩</string>
 </resources>

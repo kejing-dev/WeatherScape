@@ -135,6 +135,9 @@ class HourHold {
 object WhiteLook {
     /** Cloud colour by shade (0 fair, 1 overcast / fog, 2 rain / snow, 3 storm): light greys only. */
     val CLOUD = intArrayOf(0xF6F7F8, 0xEAECEF, 0xDCDFE3, 0xCDD1D6)
+    /** v0.1.4 (user 11-14: overcast / rain clouds turn grey): the colour the Tripo clouds' texture is multiplied by;
+     *  the darkest stays light grey: final brightness >= 0.6 by day (B24, ControlsTest). */
+    val CLOUD_TINT = intArrayOf(0xFFFFFF, 0xE4E7EA, 0xD7DBDF, 0xD0D5DA)
     const val SMOKE = 0xF1F2F3
     const val FOG = 0xE6EAEE
     const val FLAKE = 0xF7F9FB
@@ -151,7 +154,18 @@ object WhiteLook {
         return Look(FloatArray(3) { c[it] * b }, FloatArray(3) { c[it] * e })
     }
 
-    fun cloud(shade: Int, brightness: Float) = look(CLOUD[shade.coerceIn(0, 3)], brightness)
+    /**
+     * v0.1.4 Tripo clouds: the emissive carries the shaded cloud texture (emissiveTexture = base texture), the lit base is
+     * halved so light + emissive don't burn the puffs to a flat white cut-out (emulator 11-14 shots).
+     */
+    fun cloud(shade: Int, brightness: Float) = look(CLOUD_TINT[shade.coerceIn(0, 3)], brightness).let { l -> Look(FloatArray(3) { l.base[it] * 0.5f }, l.emissive) }
+
+    /** v0.1.4: lowest colour factor of the unlit snow-crystal / smoke-wisp cards (B24: never darker than light grey). */
+    const val CARD_MIN = 0.62f
+    /** Colour factor of the unlit cards at [brightness]: follows the scene, never below [CARD_MIN]. */
+    fun cardK(brightness: Float): Float = maxOf(CARD_MIN, minOf(1f, 0.25f + 0.75f * brightness))
+    /** Snow crystals stay near white at night too (snow is the brightest thing in a night scene). */
+    fun crystalK(brightness: Float): Float = maxOf(0.88f, cardK(brightness))
 
     /** Relative luminance (Rec. 709 weights on the 0..1 values). */
     fun lum(c: FloatArray) = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]

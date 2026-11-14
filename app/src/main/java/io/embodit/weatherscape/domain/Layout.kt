@@ -100,7 +100,7 @@ object Layout {
     const val CLOUD_Y1 = 0.18f
     const val CLOUD_R = 0.22f
     const val CLOUD_W = 0.14f
-    const val CLOUD_H = 0.06f
+    const val CLOUD_H = 0.07f // v0.1.4: Tripo cumulus fit box 0.14 x 0.07 x 0.10 (ModelCalib.CLOUDS)
     const val CLOUD_D = 0.10f
     /** Sky collider: the cloud layer grown 1 cm (one box over every cloud position). */
     val SKY_HIT = Aabb(V3(-CLOUD_R - 0.01f, CLOUD_Y0 - 0.01f, -CLOUD_R - 0.01f), V3(CLOUD_R + 0.01f, CLOUD_Y1 + 0.01f, CLOUD_R + 0.01f))
@@ -117,8 +117,13 @@ object Layout {
     // sun / moon: arc centre (0, -0.15, -0.12), R 0.30, in the z = -0.12 plane; sunrise at x -0.30 (east)
     val ARC_C = V3(0f, -0.15f, -0.12f)
     const val ARC_R = 0.30f
-    const val SUN_R = 0.015f
-    const val MOON_R = 0.011f
+    /** v0.1.4 (B12, user 11-14 "太阳和月亮…都要有自己的模型"): half size of the sun's halo card (the Tripo sun with its rays is
+     *  [SUN_MODEL] wide inside it); the sun at rise / set (x ±0.30) stays inside the volume's safe box. */
+    const val SUN_R = 0.020f
+    const val SUN_MODEL = 0.036f
+    /** Tripo moon (craters) diameter / 2; the phase shade shell is [MOON_SHADE_K] x larger. */
+    const val MOON_R = 0.013f
+    const val MOON_SHADE_K = 1.04f
 
     // tags: <= 0.16 x 0.04, 3 cm above the tapped thing, turned only about the vertical
     const val TAG_W = 0.16f

@@ -1,5 +1,17 @@
 # 更新记录 · Changelog
 
+## v0.1.4 · 2026-11-14
+
+**中文**
+- 太阳、月亮、云、烟都换成了自己的模型：带光芒的发光太阳（慢慢转、带光晕），有环形山的月亮（按当天月相亮一部分），三种蓬松积云（阴天、雨天变浅灰），烟囱上一团烟，一缕一缕往上飘、变大、变淡
+- 雪花换成看得出六个角的结晶，正对你、慢慢转着飘下来；屋顶积雪照旧
+- 设置里加了 [怎么玩]，随时再看一遍操作说明
+
+**English**
+- The sun, moon, clouds and smoke have their own models now: a glowing sun with rays (slowly turning, soft halo), a cratered moon showing the real phase, three fluffy cumulus shapes (light grey when overcast or raining), and smoke that rises from the chimney in wisps that grow and fade
+- Snowflakes are six-armed crystals that face you and turn as they fall; roof snow stays
+- Settings has [How it works] to see the how-to card again
+
 ## v0.1.3 · 2026-11-13
 
 **中文**
