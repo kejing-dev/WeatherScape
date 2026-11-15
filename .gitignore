@@ -39,3 +39,4 @@ tools/harness/.state/
 
 .env
 *.env
+.pale-model-cache.json

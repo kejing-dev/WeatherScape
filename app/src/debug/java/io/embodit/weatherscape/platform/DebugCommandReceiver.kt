@@ -16,7 +16,9 @@ import io.embodit.weatherscape.ui.scene.SceneHolder
 import io.embodit.weatherscape.ui.scene.VolumeListener
 import io.embodit.weatherscape.ui.scene.VolumeTargets
 import io.embodit.weatherscape.ui.scene.gainOf
+import io.embodit.weatherscape.ui.scene.input.BoardInputConfig
 import io.embodit.weatherscape.ui.scene.input.BoardInputLog
+import io.embodit.weatherscape.ui.scene.input.DragTotal
 import io.embodit.weatherscape.ui.scene.input.InputSource
 import io.embodit.weatherscape.ui.scene.input.Offset3M
 import io.embodit.weatherscape.ui.scene.input.resolveUp
@@ -70,12 +72,22 @@ class DebugCommandReceiver : BroadcastReceiver() {
                 val ms = f.getOrNull(2)?.toLongOrNull() ?: 600L
                 val scene = SceneHolder.scene ?: return
                 val l = VolumeListener(graph, scene)
-                l.onDragStart(Names.RING, src)
                 graph.scope.launch {
+                    // v0.1.5 (D53 drag-delta): send SDK 6.1.9-style per-event deltas and add them up with the same
+                    // DragTotal + dragStartM threshold as BoardInput's detector, so the replay exercises the accumulation.
                     val steps = (ms / 16).toInt().coerceAtLeast(2)
-                    for (i in 1..steps) { l.onDragMove(Offset3M(m * i / steps, 0f, 0f)); delay(16) }
-                    l.onDragEnd()
-                    Log.i(TAG, "DRAG done m=$m src=${src.label} gain=${gainOf(src)}")
+                    val total = DragTotal()
+                    val startM = BoardInputConfig().dragStartM
+                    var dragging = false
+                    var d = Offset3M(0f, 0f, 0f)
+                    for (i in 1..steps) {
+                        d = total.add(Offset3M(m / steps, 0f, 0f))
+                        if (!dragging && d.length > startM) dragging = l.onDragStart(Names.RING, src)
+                        if (dragging) l.onDragMove(d)
+                        delay(16)
+                    }
+                    if (dragging) l.onDragEnd()
+                    Log.i(TAG, "DRAG done m=$m events=${total.events} total=${"%.3f".format(d.x)} started=$dragging src=${src.label} gain=${gainOf(src)}")
                 }
             }
             "back" -> flow.backToNow()

@@ -105,7 +105,7 @@ volume and the window. `tools/shots.sh OUTDIR zh|en NAME...` captures a list.
 | S00 准备中 | `s00hold on`, force-stop + launch, capture within 10 s, `s00hold off` | plinth + ring first, window spinner |
 | S01 第一次 | `goto S01` | how-to card, ring rim breathes |
 | S02 现在 | `goto S02` (sample day, 0 h clear night) · `now <h>` moves the virtual now | |
-| S03 正在拨 | `goto S03` (a real slow drag) · `drag "<m> [eye-hand]"` | |
+| S03 正在拨 | `goto S03` (a real slow drag) · `drag "<m> [src] [ms]"` (v0.1.5: SDK-style per-event deltas summed by BoardInput `DragTotal`, log `DRAG done … events= total=`) | |
 | S04 看以后 | `goto S04` (15 h) · `scrub <h>` · `night 1|0|off` | qaCombos: h7 h11 h15 h16 h19 h23 h31 h34 h46 (+night overlays) |
 | S05 问一句 | `goto S05` · `tag sky|tree|house` | |
 | S06 / S07 城市 | `goto S06` · `search 杭州` · `search zzzz` · `pick 0` · `replace yes|no` | full list -> replace ask in place |

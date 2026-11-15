@@ -83,7 +83,12 @@ interface BoardInputListener<T : Any> {
 
     fun onRelease() {}
 
-    /** Total movement since the press, metres, volume axes (+X right, +Y up, +Z toward the user). */
+    /**
+     * Total movement since the press, metres, view axes: the SUM of every event's `dragAmount`. SDK 6.1.9
+     * `detectSpatialDragGesture` reports `dragAmount = position3d - previousPosition3d` (one event's delta), not the
+     * travel since the press; reading it as a total pinned the dragged thing to its start (weather-scape v0.1.4 headset
+     * input-log q5-1, render-lab v0.1.2, 2026-11-14). [DragTotal] adds them up.
+     */
     fun onDragMove(totalM: Offset3M) {}
 
     fun onDragEnd() {}
@@ -133,6 +138,19 @@ object BoardInputLog {
             f.appendText("${stamp.format(java.util.Date())} $tag: $msg\n")
         }
     }
+}
+
+/**
+ * Sums the per-event `dragAmount` of one press into the travel since the press (SDK 6.1.9 sends deltas).
+ * Unit tested with the headset pattern: 60 events x 2 mm must total 12 cm (DragTotalTest).
+ */
+class DragTotal {
+    var x = 0f; private set
+    var y = 0f; private set
+    var z = 0f; private set
+    var events = 0; private set
+    fun reset() { x = 0f; y = 0f; z = 0f; events = 0 }
+    fun add(step: Offset3M): Offset3M { x += step.x; y += step.y; z += step.z; events++; return Offset3M(x, y, z) }
 }
 
 /** Shared between the tap and drag detectors so one press is never handled twice. */
@@ -231,10 +249,12 @@ fun <T : Any> Modifier.boardInput(
             var startMs = 0L
             var maxTravel = 0f
             var dragging = false
+            val total = DragTotal()
             detectSpatialDragGesture(
                 context = context,
                 targetedToEntity = TargetEntity.any(),
                 onDragStart = { _, v ->
+                    total.reset()
                     val (hit, path) = resolveUp(v.targetEntity, currentResolver, config.maxResolveDepth)
                     startHit = hit; startPath = path; startSrc = InputSource.of(v.interactionKind)
                     startMs = SystemClock.uptimeMillis(); maxTravel = 0f; dragging = false
@@ -262,7 +282,8 @@ fun <T : Any> Modifier.boardInput(
                     dragging = false
                 },
             ) { v ->
-                val d = toMeters(v.dragAmount)
+                // dragAmount is this event's delta (SDK 6.1.9): add it up
+                val d = total.add(toMeters(v.dragAmount))
                 if (d.length > maxTravel) maxTravel = d.length
                 val hit = startHit
                 if (!dragging && hit != null && d.length > config.dragStartM) {

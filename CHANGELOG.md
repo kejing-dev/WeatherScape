@@ -1,5 +1,13 @@
 # 更新记录 · Changelog
 
+## v0.1.5 · 2026-11-14
+
+**中文**
+- 拨铜环跟手了：之前拖动只认最后一帧的那一点位移，环几乎拨不动；现在从按下起把每一帧的位移加起来，手挪多远环就转多远
+
+**English**
+- Turning the brass ring follows your hand now: the drag used only the last frame's tiny movement, so the ring barely moved; it now adds up the movement since you grabbed it
+
 ## v0.1.4 · 2026-11-14
 
 **中文**
