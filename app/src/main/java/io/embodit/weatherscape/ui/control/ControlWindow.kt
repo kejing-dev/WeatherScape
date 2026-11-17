@@ -70,6 +70,7 @@ import io.embodit.weatherscape.BuildConfig
 import io.embodit.weatherscape.R
 import io.embodit.weatherscape.domain.City
 import io.embodit.weatherscape.domain.Language
+import io.embodit.weatherscape.domain.Locate
 import io.embodit.weatherscape.domain.Phase
 import io.embodit.weatherscape.domain.SearchStatus
 import io.embodit.weatherscape.domain.Settings
@@ -116,12 +117,14 @@ fun ControlWindow() {
         if (Ui.page != Page.CITIES) graph.flow.cancelReplace()
     }
     LaunchedEffect(st.phase) { if (st.phase == Phase.WELCOME) Ui.page = Page.WEATHER }
+    // v0.1.6: [用我现在的位置] found a city while the list is full -> the replace question on the cities page
+    LaunchedEffect(st.search.replace) { if (st.search.replace != null && Ui.page == Page.SETTINGS) Ui.page = Page.CITIES }
 
     Box(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp)) {
         when (Ui.page) {
             Page.WEATHER -> if (st.phase == Phase.WELCOME) HowToPage(graph) else WeatherPage(st, settings, zh, unit, graph)
             Page.CITIES -> CitiesPage(st, zh, unit, graph)
-            Page.SETTINGS -> SettingsPage(settings, zh, unit, graph)
+            Page.SETTINGS -> SettingsPage(st, settings, zh, unit, graph)
         }
     }
     // The native TabBar is its own system window: labels resolved here, in the app-language context (ui_gates tabbar-lang).
@@ -158,8 +161,12 @@ private fun WeatherPage(st: WState, settings: Settings, zh: Boolean, unit: TempU
             Icon(painter = painterResource(R.drawable.ic_tab_cities), contentDescription = null, modifier = Modifier.size(26.dp), tint = WeatherColors.InkSecondary)
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                val cityName = st.city?.name(zh) ?: stringResource(R.string.sample_city)
-                Txt("$cityName · ${Texts.time(s, h, zh)}", "weather/place", style = PicoTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), color = WeatherColors.Ink)
+                // v0.1.6 (D56): the city by IP, the time by the weather station: at "now" the panel names the observation
+                // time (Open-Meteo current.time, the city's local clock), never the headset's clock or time zone
+                val cityName = st.city?.name(zh) ?: stringResource(if (st.locate == Locate.BUSY) R.string.locating else R.string.sample_city)
+                val obs = st.observed
+                val timeWord = if (h <= 0 && obs != null && s.source != Source.SAMPLE && st.city != null) stringResource(R.string.observed_at, obs) else Texts.time(s, h, zh)
+                Txt(if (st.city == null && st.locate == Locate.BUSY) cityName else "$cityName · $timeWord", "weather/place", style = PicoTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), color = WeatherColors.Ink)
                 val note = if (st.offline && s.source == Source.CACHE) stringResource(R.string.offline_line, s.ageHours.coerceAtLeast(1)) else Texts.sourceNote(s, zh)
                 if (note != null) Txt(note, "weather/source", style = PicoTheme.typography.bodySmall, color = WeatherColors.InkSecondary, maxLines = 2)
             }
@@ -502,7 +509,7 @@ private fun CityRow(name: String, place: String, right: String?, tag: String, cu
 // ------------------------------------------------------------------ Settings (S09 / S10)
 
 @Composable
-private fun SettingsPage(settings: Settings, zh: Boolean, unit: TempUnit, graph: Graph) {
+private fun SettingsPage(st: WState, settings: Settings, zh: Boolean, unit: TempUnit, graph: Graph) {
     val context = LocalContext.current
     val confirm = Ui.exitConfirm
     PageColumn {
@@ -516,13 +523,21 @@ private fun SettingsPage(settings: Settings, zh: Boolean, unit: TempUnit, graph:
                 { u -> if (!confirm) graph.settings.update { it.copy(unit = u) } }, Modifier.fillMaxWidth().height(64.dp), enabled = !confirm)
         }
         LabeledRow(stringResource(R.string.settings_sound), "settings/sound") {
+            // v0.1.6 (QA #6 q6-2): a 4-stop slider, taps and drags both change the stop (was segments: drags did nothing)
             val names = listOf(R.string.sound_off, R.string.sound_low, R.string.sound_mid, R.string.sound_high)
-            Segments((0..3).map { it to "${stringResource(names[it])} ${Settings.PERCENT[it]}%" }, settings.sound, "settings/sound",
-                { v -> if (!confirm) graph.settings.update { it.withSound(v) } }, Modifier.fillMaxWidth().height(64.dp), small = true, enabled = !confirm)
+            val lv = settings.sound.coerceIn(0, 3)
+            VolumeSlider(lv, stringResource(R.string.sound_level, stringResource(names[lv]), Settings.PERCENT[lv]), stringResource(R.string.settings_sound),
+                { v -> graph.settings.update { it.withSound(v) } }, Modifier.fillMaxWidth().height(64.dp), enabled = !confirm)
         }
-        // v0.1.4 (B19): the how-to card again, any time (Settings opens it on the weather page)
-        SecondaryButton(stringResource(R.string.howto_again), "settings/howto", onClick = { if (!confirm) { graph.flow.showHowTo(); Ui.page = Page.WEATHER } },
-            modifier = Modifier.fillMaxWidth().height(64.dp), enabled = !confirm)
+        // v0.1.4 (B19): the how-to card again; v0.1.6 (D56): [用我现在的位置] finds the city by IP again (side by side, 16 dp)
+        Row(Modifier.fillMaxWidth().height(64.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            SecondaryButton(stringResource(R.string.howto_again), "settings/howto", onClick = { if (!confirm) { graph.flow.showHowTo(); Ui.page = Page.WEATHER } },
+                modifier = Modifier.weight(1f).height(64.dp), enabled = !confirm)
+            val loc = st.locate
+            SecondaryButton(stringResource(when (loc) { Locate.BUSY -> R.string.locate_busy; Locate.FAILED -> R.string.locate_failed; else -> R.string.btn_use_location }), "settings/locate",
+                onClick = { if (!confirm) { if (loc == Locate.FAILED) Ui.page = Page.CITIES else graph.flow.locate("settings") } },
+                icon = R.drawable.ic_tab_cities, modifier = Modifier.weight(1f).height(64.dp), enabled = !confirm && loc != Locate.BUSY)
+        }
         if (confirm) {
             // S10: the confirmation replaces the quit row in place; the three rows above are greyed out
             Row(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(20.dp)).background(WeatherColors.CardFace).padding(start = 16.dp, end = 4.dp),

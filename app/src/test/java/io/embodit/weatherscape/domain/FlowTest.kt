@@ -32,7 +32,8 @@ class FlowTest {
         override fun saveCities(cities: List<City>, currentId: Long?) { this.cities = cities to currentId }
     }
 
-    private class Rig(json: String?, val uiZh: Boolean = true, zone: String = "America/New_York", wall0: Long = java.time.LocalDateTime.parse("2026-11-12T14:30:00").toInstant(java.time.ZoneOffset.UTC).toEpochMilli()) {
+    /** v0.1.6: no time zone any more; the rig starts with New York saved and chosen (the IP path has its own tests). */
+    private class Rig(json: String?, val uiZh: Boolean = true, saved: City? = DefaultCities.ALL.first { it.id == -19L }.copy(lastViewedMs = 1L), wall0: Long = java.time.LocalDateTime.parse("2026-11-12T14:30:00").toInstant(java.time.ZoneOffset.UTC).toEpochMilli()) {
         val disp = StandardTestDispatcher()
         val scope = TestScope(disp)
         var wall = wall0
@@ -40,8 +41,8 @@ class FlowTest {
         var settings = Settings()
         val sounds = ArrayList<Sound>()
         val source = FakeSource(json)
-        val store = MemStore()
-        val flow = WeatherFlow(scope, disp, { wall }, { up }, source, store, { settings }, { settings = it }, { uiZh }, { zone }, { false }, { sounds += it }, { println(it) })
+        val store = MemStore().also { st -> if (saved != null) st.cities = listOf(saved) to saved.id }
+        val flow = WeatherFlow(scope, disp, { wall }, { up }, source, store, { settings }, { settings = it }, { uiZh }, { false }, { sounds += it }, { println(it) })
         fun frames(ms: Long) { val end = up + ms; while (up < end) { up += 14; flow.step() } }
     }
 

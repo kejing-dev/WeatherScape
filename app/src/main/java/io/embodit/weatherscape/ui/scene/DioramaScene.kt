@@ -20,6 +20,7 @@ import com.pico.spatial.core.ecs.resource.TextureResource
 import com.pico.spatial.core.ecs.resource.UnlitMaterial
 import com.pico.spatial.core.math.Color4
 import com.pico.spatial.core.math.Vector3
+import io.embodit.weatherscape.domain.CloudYield
 import io.embodit.weatherscape.domain.Aabb
 import io.embodit.weatherscape.domain.Ask
 import io.embodit.weatherscape.domain.Layout
@@ -142,6 +143,8 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
     private var sky: Entity? = null
     private val clouds = ArrayList<Entity>()
     private val cloudScale = FloatArray(6)
+    /** v0.1.6 q6-1: per-cloud yield to an ask tag (1 shown, 0 made way), CloudYield. */
+    private val cloudYield = FloatArray(6) { 1f }
     /** v0.1.4: the Tripo cloud models' own materials (texture kept), coloured by WhiteLook. */
     private val cloudMats = ArrayList<PhysicallyBasedMaterial>()
     private val flakes = ArrayList<Entity>()
@@ -608,13 +611,18 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
             val look = WhiteLook.cloud(p.cloudShade, p.brightness)
             for (cm in cloudMats) { applyWhite(cm, look); if (flash) cm.setEmissiveColor(Color4(0.95f, 0.98f, 1.1f, 1f)) }
         }
+        // q6-1 (QA #6): a cloud on a sightline to the ask tag (or touching it) shrinks away while the tag is up
+        val cloudTag = st.tag?.let { tagBox(it.kind) }
         for (i in 0 until clouds.size) {
             cloudScale[i] = approach(cloudScale[i], if (i < p.clouds) 1f else 0f, dt, 0.27f)
             val (cp, edge) = SceneModel.cloudPos(i, t, p.drift, p.downX, p.downZ)
-            val s = cloudScale[i] * edge
+            val drop = V3(0f, if (p.cloudShade >= 2) -0.008f else 0f, 0f)
+            val want = CloudYield.target(cp + drop, cloudTag)
+            cloudYield[i] = approach(cloudYield[i], want, dt, if (want == 0f) CloudYield.TAU_OUT else CloudYield.TAU_IN)
+            val s = cloudScale[i] * edge * cloudYield[i]
             val c = clouds[i]
             c.enabled = s > 0.02f
-            if (c.enabled) c.at(cp + V3(0f, if (p.cloudShade >= 2) -0.008f else 0f, 0f), null, s)
+            if (c.enabled) c.at(cp + drop, null, s)
         }
         fogBands.forEachIndexed { i, e ->
             e.enabled = p.fog
@@ -705,8 +713,8 @@ internal class DioramaScene(private val scope: CoroutineScope, private val graph
         moon?.enabled = p.moonUp
         if (p.moonUp) {
             moon?.at(p.moonPos)
-            // the slice hour's local date; the built-in sample day ("D1 07:00") uses today's date
-            val days = MoonPhase.epochDays(st.slice.at(p.hour).time) ?: (System.currentTimeMillis() / 86_400_000.0 + p.hour / 24.0)
+            // the slice hour's local date (forecast time); the built-in sample day ("D1 07:00") uses the server-clock date (D56)
+            val days = MoonPhase.epochDays(st.slice.at(p.hour).time) ?: (flow.now() / 86_400_000.0 + p.hour / 24.0)
             val age = MoonPhase.age(days)
             if (kotlin.math.abs(age - moonAge) > 0.02) {
                 moonAge = age

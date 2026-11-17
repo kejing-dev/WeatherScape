@@ -1,6 +1,6 @@
 # 天气境 WeatherScape: project guidance
 
-A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.4.
+A tabletop weather diorama for PICO OS 6 Shared Space (Spatial SDK BOM 6.1.9), package `io.embodit.weatherscape`, v0.1.6.
 Design contract: spatial-app-factory `apps/weather-scape/design-package.json` (v1.0, gate B passed 2026-11-12 with all
 defaults: turn the brass ring through 48 h + tap cloud / tree / house; Open-Meteo, CC BY, non-commercial; Shared Space,
 archetype A, 生产力; stone house A + birch + island A + lamp, procedural vane; no photos / immersive env (v2); 48 h only;
@@ -19,6 +19,23 @@ sound pool, board-input template); weather data, ring, scene and pages are new.
 - **Control window** (`WeatherScapeControl`, Planar 760 x 660 dp fixed (v0.1.2), `Placement.right(volume)`): native SpatialUI
   `TabBar`, three pages 天气 / 城市 / 设置; first run shows the how-to card on the weather page. No page scrolls.
   [退出应用] closes both containers, removes the tasks and ends the process. The app never reads the head pose.
+
+## v0.1.6 (user 11-16 on the headset: 「我在 san jose 他怎么显示就4 摄氏度…别用系统时间，用你call 的气象站的」, profile D56 + QA #6)
+- Place: the first city comes from IP geolocation (`domain/GeoIp.kt`: ipapi.co -> ipwho.is -> ipinfo.io, keyless HTTPS, 8 s
+  each), matched to the nearest GeoNames hit of the IP city name (<= 60 km, both-language names through /v1/get); nothing
+  close -> a city made from the IP answer. All services failing -> no city, sample day, "pick your city" hint (never a
+  time-zone guess). A v0.1.5 list that is one built-in city never viewed (the old time-zone pick) is located again and kept
+  in the list. Settings [用我现在的位置 / Use my location] runs the same `WeatherFlow.locate` (full list -> the replace ask).
+- Time: `WeatherFlow.now()` = device clock + the weather server's skew (HTTP Date of the forecast answer; without it
+  `current.time - utc_offset_seconds`, `ServerClock`); the city's local hour, the 48 h cut, sunrise / sunset, moon age and
+  the panel all come from the forecast (`utc_offset_seconds`, `hourly.time`, `daily`, `current.time`). Nothing reads
+  `TimeZone.getDefault()` (gate device-timezone). Row 1 at "now": "<city> · 观测 23:15 / as of 23:15".
+- q6-1 clouds give way to an ask tag (`domain/CloudYield.kt`): a cloud touching the tag zone or on a sightline from the
+  design eyes + straight-ahead eyes 10–20° above (the emulator view) shrinks away in ~0.15 s, grows back after.
+- q6-2 the Settings sound row is a 4-stop `VolumeSlider` (`ui/control/VolumeDrag.kt`, tide-tank's logic): taps and drags.
+- q6-3 `assets/models/pale-ok.txt` gives the reason for each pale model.
+- Tests: `TimePlaceTest` (device zone New York / Shanghai, device clock ±3 h, no Date header, IP failing, the v0.1.5 guess,
+  Use my location), `CloudYieldTest`, `VolumeDragTest`. Debug: `locate`, `noip 1|0`.
 
 ## v0.1.4 (gate C, user 11-14 on the headset: sun / moon / clouds / smoke / snow need their own models)
 - Sky models from Tripo (`~/Downloads/weather-scape-tripo/raw` -> `lod/` via the factory's `glb_decimate.py`), calibrated by
@@ -113,4 +130,5 @@ volume and the window. `tools/shots.sh OUTDIR zh|en NAME...` captures a list.
 | S09 / S10 设置 | `goto S09` · `goto S10` | |
 | S11 窗口关了 | `goto S11` / `closepanel`; knob tap or `reopen` | |
 | ◀ ▶ / blocks | `step -1|1` · `hold "<-1|1> <ms>"` · `block <0-7>` · `press3d "stepBack|stepFwd [ms] [src]"` (3D button through the volume listener: press, hold, release) | |
+| v0.1.6 place | `locate` (= [用我现在的位置]) · `noip 1` then `locate` (IP failing -> "没定到，去选城市"); `dump` prints `locate= observed= skew= local=` | |
 | misc | `flash [ms]` · `clock +1h` · `city <name|sample>` · `lang zh|en` · `unit c|f` · `sound 0-3` · `mute` · `testf on` · `replay "<holder> [src]"` · `dump` · `evidence` · `instances` | |

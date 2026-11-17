@@ -24,7 +24,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
-import java.util.TimeZone
 import kotlin.math.abs
 import kotlin.random.Random
 
@@ -72,7 +71,6 @@ class Graph(context: Context) {
         settings = { settings.value },
         onSettings = { settings.set(it) },
         zh = { zh() },
-        zone = { TimeZone.getDefault().id },
         reduced = { reduced() },
         onSound = { sounds.play(it) },
         log = { Log.i(TAG, it) },

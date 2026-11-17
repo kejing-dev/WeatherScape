@@ -90,11 +90,9 @@ class OpenMeteoTest {
     }
 
     @Test fun defaultCityByZone() {
-        assertEquals("上海", DefaultCities.forZone("Asia/Shanghai")!!.nameZh)
-        assertEquals("旧金山", DefaultCities.forZone("America/Los_Angeles")!!.nameZh)
-        assertEquals("东京", DefaultCities.forZone("Asia/Tokyo")!!.nameZh)
-        assertNull(DefaultCities.forZone("Pacific/Fiji"))
+        // v0.1.6 (D56): the table only suggests cities; nothing picks one from the device time zone any more
         assertEquals(24, DefaultCities.ALL.size)
+        assertTrue(DefaultCities.ALL.all { it.id in -24L..-1L })
     }
 
     @Test fun timeWords() {

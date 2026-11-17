@@ -41,8 +41,8 @@ object Sample {
 }
 
 /**
- * Built-in time zone -> city table (design weatherModel.defaultCity, content.cities: 24 cities). First launch picks the
- * city of the system time zone; a zone not in the table starts on the sample day.
+ * Built-in cities (design content.cities: 24 cities): the city page's suggestions. v0.1.6 (D56): the first city is no
+ * longer picked from the device time zone (wrong on the headset); it comes from IP geolocation (GeoIp).
  */
 object DefaultCities {
     private fun c(i: Long, zh: String, en: String, cz: String, ce: String, lat: Double, lon: Double, tz: String) =
@@ -74,16 +74,4 @@ object DefaultCities {
         c(23, "温哥华", "Vancouver", "加拿大", "Canada", 49.2497, -123.1193, "America/Vancouver"),
         c(24, "圣保罗", "São Paulo", "巴西", "Brazil", -23.5475, -46.6361, "America/Sao_Paulo"),
     )
-
-    /** Extra zones that share a table city. */
-    private val ALIAS = mapOf(
-        "Asia/Shanghai" to 2L, "Asia/Chongqing" to 5L, "Asia/Harbin" to 1L, "Asia/Urumqi" to 1L, "Asia/Macau" to 7L, "PRC" to 2L,
-        "America/Los_Angeles" to 22L, "US/Pacific" to 22L, "US/Eastern" to 19L, "US/Central" to 20L, "US/Mountain" to 21L,
-    )
-
-    /** The city of [tz], or null (-> sample day + "tap the city above"). Shanghai wins Asia/Shanghai. */
-    fun forZone(tz: String): City? {
-        ALIAS[tz]?.let { id -> return ALL.first { it.id == -id } }
-        return ALL.firstOrNull { it.tz == tz }
-    }
 }

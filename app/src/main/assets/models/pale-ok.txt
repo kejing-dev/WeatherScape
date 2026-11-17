@@ -1,0 +1,8 @@
+# B12 pale-model: these are meant to be white / grey (QA #6 q6-3 looked at each close-up: none is an untextured white model)
+cloud_a.glb 白色蓬松积云，褶皱有明暗；B24 要求云是白的，阴雨天由 WhiteLook 着浅灰（white cumulus with shaded folds; B24 wants clouds white）
+cloud_b.glb 同上，长条积云（long cumulus, same white look）
+cloud_c.glb 同上，团状积云（puffy cumulus, same white look）
+house.glb 深灰石墙配灰瓦、暖色窗光，石屋本色就是灰（grey stone walls and slate roof; stone is grey by nature）
+lamp.glb 黑铁路灯，灯头夜里自发光（black iron street lamp, the head glows at night）
+moon.glb 灰色环形山月面，外加深色月相罩（grey cratered moon under the dark phase shell）
+smoke_curl.glb 烟囱上的灰白烟团，烟就是灰白的（grey-white chimney smoke; smoke is grey-white）

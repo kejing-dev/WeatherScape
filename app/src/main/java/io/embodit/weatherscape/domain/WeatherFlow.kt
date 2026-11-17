@@ -19,6 +19,8 @@ enum class Ask { SKY, TREE, HOUSE }
 /** S05: one tag above the tapped thing for 2.5 s. */
 data class Tag(val kind: Ask, val hour: Int, val at: Long)
 
+enum class Locate { IDLE, BUSY, FAILED }
+
 enum class SearchStatus { IDLE, LOADING, RESULTS, NONE, ERROR }
 
 data class Search(
@@ -35,8 +37,12 @@ data class WState(
     val shown: Int = 0,
     val city: City? = null,
     val cities: List<City> = emptyList(),
-    /** The system time zone is not in the built-in table (advice slot says "tap the city above"). */
+    /** v0.1.6: IP geolocation failed on first start and there is no saved city (advice slot: pick a city). */
     val noCity: Boolean = false,
+    /** v0.1.6 (D56): finding the city by IP (first start / [用我现在的位置]). */
+    val locate: Locate = Locate.IDLE,
+    /** v0.1.6 (D56): the weather station's observation time, city local "HH:mm" (Open-Meteo current.time). */
+    val observed: String? = null,
     val tag: Tag? = null,
     val search: Search = Search(),
     val fetching: Boolean = false,
@@ -49,9 +55,16 @@ data class WState(
     val nowTemps: Map<Long, Pair<Float, Int>> = emptyMap(),
 )
 
+/** A forecast answer with the server's HTTP Date (UTC ms), the clock the app trusts (D56). */
+class Reply(val body: String, val dateMs: Long?)
+
 /** Network side, swapped for a fake in unit tests. */
 interface WeatherSource {
     suspend fun forecast(c: City): String
+    /** v0.1.6: the forecast plus the server's Date header. */
+    suspend fun forecastReply(c: City): Reply = Reply(forecast(c), null)
+    /** v0.1.6 (D56): one IP geolocation service's raw answer. */
+    suspend fun ipLocate(p: GeoIp.Provider): String = error("no IP geolocation")
     suspend fun search(q: String, zh: Boolean): String
     suspend fun names(id: Long, zh: Boolean): String
     suspend fun currents(cs: List<City>): String
@@ -81,7 +94,6 @@ class WeatherFlow(
     private val settings: () -> Settings,
     private val onSettings: (Settings) -> Unit,
     private val zh: () -> Boolean,
-    private val zone: () -> String,
     private val reduced: () -> Boolean,
     private val onSound: (Sound) -> Unit,
     private val log: (String) -> Unit,
@@ -119,13 +131,18 @@ class WeatherFlow(
     private var thunderAt = -1L
     private var secondFlashAt = -1L
     private var virtualShiftMs = 0L
+    /** D56: server clock - device clock (HTTP Date of the last forecast answer); the device clock is never the city's time. */
+    private var skewMs = 0L
+    private var locateJob: Job? = null
     private var forceOffline = false
     private var ready = false
     private var welcomeShown = false
 
     private fun set(f: (WState) -> WState) = synchronized(lock) { _state.value = f(_state.value) }
     val value: WState get() = _state.value
-    fun now() = wallMs() + virtualShiftMs
+    /** UTC "now" by the weather server's clock (+ the debug shift). Local time = this + the city's utc_offset_seconds. */
+    fun now() = wallMs() + skewMs + virtualShiftMs
+    val clockSkewMs: Long get() = skewMs
 
     // ------------------------------------------------------------------ start / data
 
@@ -134,17 +151,71 @@ class WeatherFlow(
         val (saved, currentId) = runCatching { store.loadCities() }.getOrDefault(emptyList<City>() to null)
         var cities = saved
         var current = cities.firstOrNull { it.id == currentId } ?: cities.firstOrNull()
-        var noCity = false
-        if (current == null) {
-            current = DefaultCities.forZone(zone())
-            if (current != null) cities = listOf(current) else noCity = true
-            runCatching { store.saveCities(cities, current?.id) }
-        }
-        set { it.copy(city = current, cities = cities, noCity = noCity) }
-        log("FLOW start city=${current?.nameEn} zone=${zone()} cities=${cities.size}")
+        // v0.1.5 picked the first city from the device time zone (D56: wrong on the headset, New York for San Jose) and
+        // saved it unviewed: such a list is a guess, so it is located again; the city stays in the list
+        val guessed = cities.size == 1 && isZoneGuess(cities[0])
+        set { it.copy(city = current, cities = cities, noCity = false) }
+        log("FLOW start city=${current?.nameEn} cities=${cities.size} guessed=$guessed")
         showCached(current)
-        current?.let { fetch(it, force = true) }
+        if (current == null || guessed) locate(if (current == null) "first start" else "replace zone guess") else fetch(current, force = true)
     }
+
+    /** A built-in city that was saved but never chosen (v0.1.5's time-zone pick). */
+    private fun isZoneGuess(c: City) = c.id in -24L..-1L && c.lastViewedMs == 0L
+
+    /**
+     * D56: find the city by IP (first start, a v0.1.5 time-zone guess, Settings [用我现在的位置]). Providers in order, 8 s
+     * each; the IP city is matched to the nearest GeoNames city (both-language names); none -> FAILED (first start: the
+     * user picks a city; a guess keeps its old city).
+     */
+    fun locate(why: String) {
+        touch()
+        locateJob?.cancel()
+        set { it.copy(locate = Locate.BUSY) }
+        log("LOCATE start ($why)")
+        locateJob = scope.launch {
+            var place: GeoIp.Place? = null
+            for (p in GeoIp.PROVIDERS) {
+                val r = runCatching {
+                    if (forceOffline || forceNoIp) error("debug offline")
+                    withTimeout(FETCH_TIMEOUT_MS) { withContext(io) { source.ipLocate(p) } }
+                }
+                place = r.getOrNull()?.let { GeoIp.parse(p, it) }
+                log("LOCATE ${p.name} -> ${place?.let { "${it.city} ${"%.3f".format(it.lat)},${"%.3f".format(it.lon)} tz=${it.tz}" } ?: ("failed " + (r.exceptionOrNull()?.message ?: "no place"))}")
+                if (place != null) break
+            }
+            val pl = place
+            if (pl == null) { onLocateFailed(why); return@launch }
+            val city = runCatching {
+                withTimeout(FETCH_TIMEOUT_MS) {
+                    withContext(io) {
+                        val near = if (pl.city.isNotBlank()) GeoIp.nearest(source.search(pl.city, false), pl) else null
+                        near?.let { c -> runCatching { OpenMeteo.mergeNames(c, source.names(c.id, true), true) }.getOrDefault(c) }
+                    }
+                }
+            }.getOrNull() ?: GeoIp.cityOf(pl)
+            set { it.copy(locate = Locate.IDLE) }
+            log("LOCATE ok ${city.nameEn}/${city.nameZh} ${"%.3f".format(city.lat)},${"%.3f".format(city.lon)} via ${pl.via} ($why)")
+            useLocated(city)
+        }
+    }
+
+    private fun onLocateFailed(why: String) {
+        val st = value
+        log("LOCATE failed ($why) city=${st.city?.nameEn}")
+        set { it.copy(locate = Locate.FAILED, noCity = it.city == null) }
+        // a v0.1.5 guess that can't be checked: keep it and fetch it as before
+        st.city?.let { if (why == "replace zone guess") fetch(it, force = true) }
+    }
+
+    /** The located city: already saved (same id or within 10 km) -> select it; else add it (full -> ask to replace). */
+    private fun useLocated(c: City) {
+        val same = value.cities.firstOrNull { it.id == c.id || GeoIp.km(it.lat, it.lon, c.lat, c.lon) < 10.0 }
+        if (same != null) selectCity(same) else pickResult(c)
+    }
+
+    /** Debug "noip 1": every IP service fails (the pick-a-city path). */
+    var forceNoIp = false
 
     /** The scene's models are in: leave S00 (first run -> S01 how-to + ring breathing). */
     fun sceneReady() {
@@ -161,10 +232,11 @@ class WeatherFlow(
         val sl = cached?.let { (json, at) ->
             runCatching { OpenMeteo.parseForecast(json) }.getOrNull()?.let { f ->
                 forecast = f; forecastAt = at
+                set { it.copy(observed = ServerClock.observedHm(f.currentTime)) }
                 OpenMeteo.slice(f, now(), Source.CACHE, ((now() - at) / 3_600_000L).toInt())
             }
         }
-        applySlice(if (sl != null && sl.hours.size >= MIN_HOURS) sl else { forecast = null; Sample.slice() }, keepRing = false)
+        applySlice(if (sl != null && sl.hours.size >= MIN_HOURS) sl else { forecast = null; set { it.copy(observed = null) }; Sample.slice() }, keepRing = false)
     }
 
     private fun applySlice(sl: Slice, keepRing: Boolean) {
@@ -186,20 +258,26 @@ class WeatherFlow(
         fetchJob = scope.launch {
             val json = runCatching {
                 if (forceOffline) error("debug offline")
-                withTimeout(FETCH_TIMEOUT_MS) { withContext(io) { source.forecast(c) } }
+                withTimeout(FETCH_TIMEOUT_MS) { withContext(io) { source.forecastReply(c) } }
             }
-            val f = json.mapCatching { OpenMeteo.parseForecast(it) }
+            val f = json.mapCatching { OpenMeteo.parseForecast(it.body) }
             if (value.city?.key != c.key) return@launch
             f.onSuccess { fc ->
-                val at = wallMs()
-                runCatching { withContext(io) { store.saveForecast(c.key, json.getOrThrow(), at) } }
+                // D56: the server's clock (HTTP Date, else current.time - utc_offset) is "now"; the device clock only ticks
+                ServerClock.skew(wallMs(), json.getOrThrow().dateMs, fc.currentTime, fc.utcOffsetSec)?.let { k ->
+                    if (kotlin.math.abs(k - skewMs) > 1_000L) log("CLOCK server skew ${k / 1000} s (device clock ${if (k >= 0) "behind" else "ahead"})")
+                    skewMs = k
+                }
+                val at = now()
+                runCatching { withContext(io) { store.saveForecast(c.key, json.getOrThrow().body, at) } }
                 forecast = fc; forecastAt = at
+                set { it.copy(observed = ServerClock.observedHm(fc.currentTime)) }
                 val sl = OpenMeteo.slice(fc, now(), Source.LIVE)
                 if (sl != null && sl.hours.size >= MIN_HOURS) {
                     // S08 -> live: refresh quietly, the ring keeps its position
                     applySlice(sl, keepRing = true)
                     set { it.copy(fetching = false, offline = false) }
-                    log("FETCH ok ${c.nameEn} ${sl.hours.size} h")
+                    log("FETCH ok ${c.nameEn} ${sl.hours.size} h observed=${fc.currentTime} offset=${fc.utcOffsetSec} tz=${fc.timezone} local=${ServerClock.localHm(now(), fc.utcOffsetSec)}")
                 } else {
                     set { it.copy(fetching = false, offline = true) }
                     log("FETCH short ${c.nameEn}")
@@ -468,7 +546,7 @@ class WeatherFlow(
         touch()
         val viewed = c.copy(lastViewedMs = wallMs())
         val cities = value.cities.map { if (it.id == c.id) viewed else it }.let { l -> if (l.none { it.id == c.id }) l + viewed else l }
-        set { it.copy(city = viewed, cities = cities, noCity = false, search = Search(), offline = false, tag = null) }
+        set { it.copy(city = viewed, cities = cities, noCity = false, search = Search(), offline = false, tag = null, locate = if (it.locate == Locate.FAILED) Locate.IDLE else it.locate) }
         runCatching { store.saveCities(cities, c.id) }
         synchronized(lock) { ring.jump(0f) }
         set { it.copy(phase = if (it.phase == Phase.WELCOME) it.phase else Phase.NOW, shown = 0) }
@@ -589,7 +667,7 @@ class WeatherFlow(
         fetchJob?.cancel()
         forecast = null
         synchronized(lock) { ring.jump(0f) }
-        set { it.copy(offline = false, phase = if (it.phase == Phase.LOADING || it.phase == Phase.WELCOME) it.phase else Phase.NOW) }
+        set { it.copy(offline = false, observed = null, phase = if (it.phase == Phase.LOADING || it.phase == Phase.WELCOME) it.phase else Phase.NOW) }
         applySlice(Sample.slice(), keepRing = false)
     }
 
@@ -597,12 +675,13 @@ class WeatherFlow(
     fun debugSampleNow(h: Int) {
         fetchJob?.cancel(); forecast = null
         applySlice(Sample.slice(h.coerceIn(0, 47)), keepRing = false)
-        set { it.copy(phase = if (it.phase == Phase.LOADING || it.phase == Phase.WELCOME) it.phase else Phase.NOW, shown = 0, offline = false) }
+        set { it.copy(observed = null, phase = if (it.phase == Phase.LOADING || it.phase == Phase.WELCOME) it.phase else Phase.NOW, shown = 0, offline = false) }
     }
 
     fun dump(): String {
         val s = value
         return "phase=${s.phase.id} shown=${s.shown} ring=${"%.2f".format(ring.pos)} mode=${ring.mode} end=${ring.end} src=${s.slice.source} age=${s.slice.ageHours} " +
-            "city=${s.city?.nameEn} cities=${s.cities.map { it.nameEn }} offline=${s.offline} fetching=${s.fetching} tag=${s.tag?.kind} search=${s.search.status} night=${s.night}"
+            "city=${s.city?.nameEn} cities=${s.cities.map { it.nameEn }} offline=${s.offline} fetching=${s.fetching} tag=${s.tag?.kind} search=${s.search.status} night=${s.night} " +
+            "locate=${s.locate} observed=${s.observed} skew=${skewMs / 1000}s local=${forecast?.let { ServerClock.localHm(now(), it.utcOffsetSec) }} firstHour=${s.slice.hours.first().time}"
     }
 }

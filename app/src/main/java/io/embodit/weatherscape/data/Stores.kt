@@ -3,6 +3,8 @@ package io.embodit.weatherscape.data
 import android.content.Context
 import android.util.Log
 import io.embodit.weatherscape.domain.City
+import io.embodit.weatherscape.domain.GeoIp
+import io.embodit.weatherscape.domain.Reply
 import io.embodit.weatherscape.domain.Language
 import io.embodit.weatherscape.domain.OpenMeteo
 import io.embodit.weatherscape.domain.Settings
@@ -77,19 +79,26 @@ class FileWeatherStore(context: Context) : WeatherStore {
 
 /** Open-Meteo over HttpURLConnection (no key, design weatherModel.source); every call has an 8 s connect / read timeout. */
 class HttpWeatherSource : WeatherSource {
-    private fun get(url: String): String {
+    /** Body + the server's Date header (UTC ms, 0 when absent). */
+    private fun fetch(url: String): Pair<String, Long> {
         val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = 8_000
         c.readTimeout = 8_000
         c.setRequestProperty("User-Agent", "WeatherScape/0.1 (PICO OS)")
+        c.setRequestProperty("Accept", "application/json")
         try {
             val code = c.responseCode
             if (code !in 200..299) error("HTTP $code")
-            return c.inputStream.bufferedReader().use { it.readText() }
+            val date = c.getHeaderFieldDate("Date", 0L)
+            return c.inputStream.bufferedReader().use { it.readText() } to date
         } finally { c.disconnect() }
     }
 
+    private fun get(url: String): String = fetch(url).first
+
     override suspend fun forecast(c: City): String = get(OpenMeteo.forecastUrl(c.lat, c.lon))
+    override suspend fun forecastReply(c: City): Reply = fetch(OpenMeteo.forecastUrl(c.lat, c.lon)).let { (body, date) -> Reply(body, date.takeIf { it > 0L }) }
+    override suspend fun ipLocate(p: GeoIp.Provider): String = get(p.url)
     override suspend fun search(q: String, zh: Boolean): String = get(OpenMeteo.searchUrl(q, zh))
     override suspend fun names(id: Long, zh: Boolean): String = get(OpenMeteo.getUrl(id, zh))
     override suspend fun currents(cs: List<City>): String = get(OpenMeteo.currentsUrl(cs))

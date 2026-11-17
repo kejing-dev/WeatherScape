@@ -11,7 +11,7 @@
     <string name="btn_now">现在</string>
     <string name="btn_mute">静音</string>
     <string name="btn_unmute">开声音</string>
-    <string name="no_city_hint">点上面的城市换成你那儿。</string>
+    <string name="no_city_hint">没找到你在哪儿，去「城市」页选一个。</string>
     <string name="sample_city">示例天气</string>
     <string name="strip_today">今天</string>
     <string name="strip_tomorrow">明天</string>
@@ -61,4 +61,11 @@
     <string name="strip_block">跳到</string>
     <string name="strip_block_off">这段已过预报末尾</string>
     <string name="howto_again">怎么玩</string>
+    <!-- v0.1.6 (D56): 城市按 IP 定位，时间按气象站 -->
+    <string name="locating">正在找你在哪儿…</string>
+    <string name="observed_at">观测 %1$s</string>
+    <string name="btn_use_location">用我现在的位置</string>
+    <string name="locate_busy">正在定位…</string>
+    <string name="locate_failed">没定到，去选城市</string>
+    <string name="sound_level">%1$s %2$d%%</string>
 </resources>

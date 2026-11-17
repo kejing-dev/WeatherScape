@@ -48,7 +48,7 @@ class HitReplayTest {
             override fun saveCities(cities: List<io.embodit.weatherscape.domain.City>, currentId: Long?) {}
         }
         var settings = Settings(seenHowTo = true)
-        val flow = io.embodit.weatherscape.domain.WeatherFlow(scope, disp, { 0L }, { up }, src, store, { settings }, { settings = it }, { true }, { "Asia/Shanghai" }, { false }, {}, {})
+        val flow = io.embodit.weatherscape.domain.WeatherFlow(scope, disp, { 0L }, { up }, src, store, { settings }, { settings = it }, { true }, { false }, {}, {})
         flow.debugSample(); flow.sceneReady(); flow.welcomeDone()
         fun frames(ms: Long) { val end = up + ms; while (up < end) { up += 14; flow.step() } }
         routeFlow(flow, Names.STEP_BACK); frames(400)

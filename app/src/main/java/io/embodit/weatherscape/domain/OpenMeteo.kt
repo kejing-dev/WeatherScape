@@ -53,6 +53,8 @@ data class Forecast(
     val currentFeels: Float?,
     val currentCode: Int?,
     val currentIsDay: Boolean?,
+    /** v0.1.6: the IANA zone Open-Meteo resolved for the coordinates (logs only; times use [utcOffsetSec]). */
+    val timezone: String = "",
 )
 
 object OpenMeteo {
@@ -119,6 +121,7 @@ object OpenMeteo {
             currentFeels = c?.takeIf { it.has("apparent_temperature") && !it.isNull("apparent_temperature") }?.getDouble("apparent_temperature")?.toFloat(),
             currentCode = c?.takeIf { it.has("weather_code") && !it.isNull("weather_code") }?.getInt("weather_code"),
             currentIsDay = c?.takeIf { it.has("is_day") && !it.isNull("is_day") }?.getInt("is_day")?.let { it == 1 },
+            timezone = o.optString("timezone", ""),
         )
     }
 

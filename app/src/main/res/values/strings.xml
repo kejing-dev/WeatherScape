@@ -11,7 +11,7 @@
     <string name="btn_now">Now</string>
     <string name="btn_mute">Mute</string>
     <string name="btn_unmute">Sound on</string>
-    <string name="no_city_hint">Tap the city above to pick yours.</string>
+    <string name="no_city_hint">Couldn\'t find where you are. Pick your city on the Cities tab.</string>
     <string name="sample_city">Sample day</string>
     <string name="strip_today">Today</string>
     <string name="strip_tomorrow">Tomorrow</string>
@@ -61,4 +61,11 @@
     <string name="strip_block">Jump to</string>
     <string name="strip_block_off">Past the forecast end</string>
     <string name="howto_again">How it works</string>
+    <!-- v0.1.6 (D56): city by IP, time by the weather station -->
+    <string name="locating">Finding where you are…</string>
+    <string name="observed_at">as of %1$s</string>
+    <string name="btn_use_location">Use my location</string>
+    <string name="locate_busy">Finding you…</string>
+    <string name="locate_failed">Not found, pick a city</string>
+    <string name="sound_level">%1$s %2$d%%</string>
 </resources>

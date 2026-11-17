@@ -109,6 +109,9 @@ class DebugCommandReceiver : BroadcastReceiver() {
             "city" -> if (a == "sample") flow.debugSample() else (DefaultCities.ALL.firstOrNull { it.nameEn.equals(a, true) || it.nameZh == a } ?: flow.value.cities.firstOrNull { it.nameEn.equals(a, true) || it.nameZh == a })?.let { flow.selectCity(it) }
             "now" -> a.toIntOrNull()?.let { flow.debugSampleNow(it) }
             "offline" -> flow.debugOffline(on)
+            // v0.1.6 (D56): "locate" = Settings [用我现在的位置]; "noip 1" = every IP service fails (the pick-a-city path)
+            "locate" -> flow.locate("debug")
+            "noip" -> flow.forceNoIp = on
             "night" -> flow.setNight(if (a == "off") null else on)
             "clock" -> { val h = a.removeSuffix("h").toIntOrNull() ?: 1; flow.debugClock(h * 3_600_000L) }
             "lang" -> graph.settings.update { it.copy(language = when (a) { "zh" -> Language.ZH; "en" -> Language.EN; else -> Language.SYSTEM }) }

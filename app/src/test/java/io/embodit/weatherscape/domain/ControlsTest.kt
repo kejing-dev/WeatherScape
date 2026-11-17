@@ -97,7 +97,7 @@ class ControlsTest {
         val scope = TestScope(disp)
         var up = 1000L
         var settings = Settings(seenHowTo = true)
-        val flow = WeatherFlow(scope, disp, { 0L }, { up }, NoSource, NoStore, { settings }, { settings = it }, { true }, { "Asia/Shanghai" }, { false }, {}, {})
+        val flow = WeatherFlow(scope, disp, { 0L }, { up }, NoSource, NoStore, { settings }, { settings = it }, { true }, { false }, {}, {})
         fun frames(ms: Long) { val end = up + ms; while (up < end) { up += 14; flow.step() } }
         init { flow.debugSample(); flow.sceneReady(); flow.welcomeDone(); frames(100) }
     }
