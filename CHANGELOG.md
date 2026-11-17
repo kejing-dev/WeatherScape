@@ -1,5 +1,26 @@
 # 更新记录 · Changelog
 
+## v0.1.6 · 2026-11-17
+
+**中文**
+- 位置先问系统：第一次打开会问一次粗略位置权限，允许就按系统定位找最近的城市；拒绝或没定到才按网络 IP 猜，IP 属于云服务 / 机房 / VPN 的直接丢掉，不再把你放到几百公里外的机房城市，这时会请你去「城市」页选一个，并给 [去设置]
+- 「现在」按气象服务器的时间算，不读头显的时区：表头写「<城市> · 观测 hh:mm」，是那座城市的当地时间；头显时区设错了，城市、气温、时间都不受影响
+- 设置里加 [用我现在的位置]，随时重新定位
+- 点树、点房子、点天空时，云让开小牌，读数不再被挡
+- 声音改成 4 档滑条，点或拖都会换档
+
+**English**
+- Location asks the system first: on first launch the app asks once for approximate location and, if allowed, picks the nearest city. Only when that is denied or fails does it guess from your IP, and IPs that belong to cloud / data-centre / VPN providers are discarded, so you no longer land in a far-away server town. You are then asked to pick a city, with a [Settings] shortcut.
+- "Now" follows the weather server's clock, not the headset's time zone: the header reads "<city> · as of hh:mm" in that city's local time, so a wrong headset time zone no longer shifts the city, temperature or hour.
+- Settings has [Use my location] to locate again at any time.
+- Clouds move out of the way of the tree / house / sky tags.
+- Sound is a 4-step slider; tapping or dragging both change the step.
+
+**已知问题 / Known issues**
+- 权限框 60 秒没回答会按「不允许」处理，之后再点 [允许] 不会当场定位，要到设置里点 [用我现在的位置] / If the permission dialog goes unanswered for 60 s it counts as denied; tapping [Allow] afterwards does not locate right away — use [Use my location] in Settings.
+- 离线时已经在「现在」，[回到现在] 仍是高亮 / Offline, [Back to now] stays highlighted even though you are already at "now".
+- 冷启动加载模型较慢 / Models load slowly on a cold start.
+
 ## v0.1.5 · 2026-11-14
 
 **中文**
