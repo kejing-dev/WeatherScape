@@ -68,4 +68,7 @@
     <string name="locate_busy">Finding you…</string>
     <string name="locate_failed">Not found, pick a city</string>
     <string name="sound_level">%1$s %2$d%%</string>
+    <string name="no_city_hint_denied">No location access. Pick your city on the Cities tab.</string>
+    <string name="btn_open_settings">Settings</string>
+    <string name="locate_failed_pick">Not found, try again</string>
 </resources>

@@ -51,6 +51,8 @@ class Graph(context: Context) {
     val settings = SettingsStore(app)
     val sounds = SoundPlayer(app)
     val window = WindowCtl()
+    /** D56 amended: system location (ACCESS_COARSE_LOCATION). */
+    val locator = AndroidLocator(app)
     /** S00 -> ready: the volume's models are in. */
     val sceneReady = MutableStateFlow(false)
 
@@ -74,6 +76,7 @@ class Graph(context: Context) {
         reduced = { reduced() },
         onSound = { sounds.play(it) },
         log = { Log.i(TAG, it) },
+        locator = locator,
     )
 
     init {

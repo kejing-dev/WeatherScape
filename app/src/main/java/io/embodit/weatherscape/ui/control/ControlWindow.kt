@@ -102,9 +102,34 @@ fun ControlWindow() {
     val settings by graph.settings.settings.collectAsStateWithLifecycle()
     val owner = LocalLifecycleOwner.current
     val nav = LocalSpatialNavigator.current
+    // D56 amended: the system location-permission dialog (ActivityResultContracts.RequestPermission), asked when the flow
+    // wants a location (start, [用我现在的位置]); denied -> IP fallback -> pick a city, the app keeps working
+    val activity = remember(context) { context.findActivity() }
+    val permLauncher = remember(activity) {
+        (activity as? androidx.activity.ComponentActivity)?.activityResultRegistry?.register("ws-location", androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+            Log.i(TAG, "PERM ACCESS_COARSE_LOCATION -> $ok")
+            graph.flow.onLocationPermission(ok)
+        }
+    }
+    DisposableEffect(permLauncher) { onDispose { permLauncher?.unregister() } }
+    LaunchedEffect(st.askLocation) {
+        if (!st.askLocation) return@LaunchedEffect
+        if (graph.locator.granted()) { graph.flow.onLocationPermission(true); return@LaunchedEffect }
+        Log.i(TAG, "PERM asking ACCESS_COARSE_LOCATION (${if (permLauncher != null) "RequestPermission" else "requestPermissions"} on ${activity?.javaClass?.simpleName})")
+        if (permLauncher != null) runCatching { permLauncher.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION) }.onFailure { Log.w(TAG, "PERM launch failed", it); graph.flow.onLocationPermission(false) }
+        else activity?.requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), 41) ?: graph.flow.onLocationPermission(false)
+    }
     DisposableEffect(owner, nav) {
         graph.window.attachPanel(nav)
-        val obs = LifecycleEventObserver { _, e -> graph.window.onPanelLifecycle(e.name) }
+        val obs = LifecycleEventObserver { _, e ->
+            graph.window.onPanelLifecycle(e.name)
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                val fs = graph.flow.value
+                // back from the system dialog (no registry) or from [去设置] with the permission now on
+                if (fs.askLocation && graph.locator.granted()) graph.flow.onLocationPermission(true)
+                else if (fs.locPerm == io.embodit.weatherscape.domain.LocPerm.DENIED && graph.locator.granted() && fs.locate != Locate.BUSY) graph.flow.locate("permission turned on in settings")
+            }
+        }
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
@@ -194,9 +219,16 @@ private fun WeatherPage(st: WState, settings: Settings, zh: Boolean, unit: TempU
                 }
             }
             // row 3: the advice sentence (or the no-city hint)
-            Box(Modifier.fillMaxWidth().height(64.dp), contentAlignment = Alignment.CenterStart) {
-                val line = if (st.noCity && st.city == null) stringResource(R.string.no_city_hint) else Texts.advice(s, h, zh, unit).second
-                Txt(line, "weather/advice", style = PicoTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = WeatherColors.Ink, maxLines = 2)
+            val ctx = LocalContext.current
+            Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+                val pick = st.noCity && st.city == null
+                val line = if (pick) stringResource(if (st.locPerm == io.embodit.weatherscape.domain.LocPerm.DENIED) R.string.no_city_hint_denied else R.string.no_city_hint) else Texts.advice(s, h, zh, unit).second
+                Txt(line, "weather/advice", style = PicoTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = WeatherColors.Ink, maxLines = 2, modifier = Modifier.weight(1f))
+                // D56 amended: location denied -> [去设置] (app details) beside the "pick a city" line
+                if (pick && st.locPerm == io.embodit.weatherscape.domain.LocPerm.DENIED) {
+                    Spacer(Modifier.width(16.dp))
+                    SecondaryButton(stringResource(R.string.btn_open_settings), "weather/open-settings", onClick = { openAppSettings(ctx) }, modifier = Modifier.width(168.dp).height(64.dp))
+                }
             }
             // row 4: 8 blocks x 6 h (tap = the ring turns to the block's middle hour); the chart is display only
             Strip(st, zh, Modifier.fillMaxWidth().height(STRIP_H)) { b ->
@@ -534,8 +566,8 @@ private fun SettingsPage(st: WState, settings: Settings, zh: Boolean, unit: Temp
             SecondaryButton(stringResource(R.string.howto_again), "settings/howto", onClick = { if (!confirm) { graph.flow.showHowTo(); Ui.page = Page.WEATHER } },
                 modifier = Modifier.weight(1f).height(64.dp), enabled = !confirm)
             val loc = st.locate
-            SecondaryButton(stringResource(when (loc) { Locate.BUSY -> R.string.locate_busy; Locate.FAILED -> R.string.locate_failed; else -> R.string.btn_use_location }), "settings/locate",
-                onClick = { if (!confirm) { if (loc == Locate.FAILED) Ui.page = Page.CITIES else graph.flow.locate("settings") } },
+            SecondaryButton(stringResource(when (loc) { Locate.BUSY -> R.string.locate_busy; Locate.FAILED -> R.string.locate_failed_pick; else -> R.string.btn_use_location }), "settings/locate",
+                onClick = { if (!confirm) graph.flow.locate("settings") },
                 icon = R.drawable.ic_tab_cities, modifier = Modifier.weight(1f).height(64.dp), enabled = !confirm && loc != Locate.BUSY)
         }
         if (confirm) {
@@ -560,6 +592,22 @@ private fun LabeledRow(label: String, tag: String, content: @Composable () -> Un
         Txt(label, "$tag/label", style = PicoTheme.typography.labelLarge, color = WeatherColors.InkSecondary)
         content()
     }
+}
+
+/** The activity behind a window context. */
+internal fun Context.findActivity(): android.app.Activity? {
+    var c: Context? = this
+    while (c is android.content.ContextWrapper) { if (c is android.app.Activity) return c; c = c.baseContext }
+    return null
+}
+
+/** D56 amended: [去设置] -> this app's system settings page (permissions). */
+internal fun openAppSettings(context: Context) {
+    Log.i(TAG, "PERM open app settings")
+    runCatching {
+        context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", context.packageName, null))
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure { Log.w(TAG, "PERM open settings failed", it) }
 }
 
 /** D26 / D44 exit: release, close both window containers, remove every task, then end the process. */

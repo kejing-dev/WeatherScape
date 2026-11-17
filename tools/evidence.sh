@@ -11,6 +11,9 @@ P() { pico-cli interact act --package $PKG --device "$DEV" --action click --form
 L() { "$ADB" -s "$DEV" shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; }
 mkdir -p "$B"
 "$ADB" -s "$DEV" shell am force-stop $PKG; "$ADB" -s "$DEV" shell pm clear $PKG >/dev/null; "$ADB" -s "$DEV" logcat -c
+# v0.1.6 (D56 amended): the first start asks ACCESS_COARSE_LOCATION; evidence runs grant it and put the emulator in San Jose
+# (the permission dialog itself is shot by hand: pm revoke + cold start, shots-v0.1.6/perm-*)
+"$ADB" -s "$DEV" shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION; "$ADB" -s "$DEV" emu geo fix -121.8811 37.3352 >/dev/null
 L; sleep 1.5; "$K" shot "$B/s00-loading.png"; sleep 8; "$K" shot "$B/first-screen.png"
 P "知道了"; sleep 2
 "$K" cmd drag "0.12 hand-ray 700"; sleep 3; "$K" cmd drag "0.03 eye-hand 500"; sleep 3; "$K" shot "$B/after-drag.png"

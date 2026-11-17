@@ -99,6 +99,7 @@ class HttpWeatherSource : WeatherSource {
     override suspend fun forecast(c: City): String = get(OpenMeteo.forecastUrl(c.lat, c.lon))
     override suspend fun forecastReply(c: City): Reply = fetch(OpenMeteo.forecastUrl(c.lat, c.lon)).let { (body, date) -> Reply(body, date.takeIf { it > 0L }) }
     override suspend fun ipLocate(p: GeoIp.Provider): String = get(p.url)
+    override suspend fun reverse(lat: Double, lon: Double): String = get(GeoIp.reverseUrl(lat, lon))
     override suspend fun search(q: String, zh: Boolean): String = get(OpenMeteo.searchUrl(q, zh))
     override suspend fun names(id: Long, zh: Boolean): String = get(OpenMeteo.getUrl(id, zh))
     override suspend fun currents(cs: List<City>): String = get(OpenMeteo.currentsUrl(cs))

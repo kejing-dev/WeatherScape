@@ -21,6 +21,9 @@ data class Tag(val kind: Ask, val hour: Int, val at: Long)
 
 enum class Locate { IDLE, BUSY, FAILED }
 
+/** ACCESS_COARSE_LOCATION as far as the app knows (D56 amended). */
+enum class LocPerm { UNKNOWN, GRANTED, DENIED }
+
 enum class SearchStatus { IDLE, LOADING, RESULTS, NONE, ERROR }
 
 data class Search(
@@ -43,6 +46,9 @@ data class WState(
     val locate: Locate = Locate.IDLE,
     /** v0.1.6 (D56): the weather station's observation time, city local "HH:mm" (Open-Meteo current.time). */
     val observed: String? = null,
+    /** D56 amended: the window should show the system location-permission dialog now (ActivityResultContracts.RequestPermission). */
+    val askLocation: Boolean = false,
+    val locPerm: LocPerm = LocPerm.UNKNOWN,
     val tag: Tag? = null,
     val search: Search = Search(),
     val fetching: Boolean = false,
@@ -63,6 +69,8 @@ interface WeatherSource {
     suspend fun forecast(c: City): String
     /** v0.1.6: the forecast plus the server's Date header. */
     suspend fun forecastReply(c: City): Reply = Reply(forecast(c), null)
+    /** D56 amended: reverse geocoding of a system fix (BigDataCloud keyless) -> raw answer. */
+    suspend fun reverse(lat: Double, lon: Double): String = error("no reverse geocoding")
     /** v0.1.6 (D56): one IP geolocation service's raw answer. */
     suspend fun ipLocate(p: GeoIp.Provider): String = error("no IP geolocation")
     suspend fun search(q: String, zh: Boolean): String
@@ -97,6 +105,8 @@ class WeatherFlow(
     private val reduced: () -> Boolean,
     private val onSound: (Sound) -> Unit,
     private val log: (String) -> Unit,
+    /** D56 amended: system location, first choice. */
+    private val locator: DeviceLocator = DeviceLocator.NONE,
 ) {
     companion object {
         const val FETCH_TIMEOUT_MS = 8_000L
@@ -109,6 +119,8 @@ class WeatherFlow(
         const val SOUND_COOLDOWN_MS = 3_000L
         const val TICK_MIN_MS = 125L // at most 8 a second
         const val MIN_HOURS = 12
+        /** How long to wait for the permission dialog's answer before going on without it. */
+        const val ASK_TIMEOUT_MS = 60_000L
     }
 
     private val lock = Any()
@@ -164,40 +176,95 @@ class WeatherFlow(
     private fun isZoneGuess(c: City) = c.id in -24L..-1L && c.lastViewedMs == 0L
 
     /**
-     * D56: find the city by IP (first start, a v0.1.5 time-zone guess, Settings [用我现在的位置]). Providers in order, 8 s
-     * each; the IP city is matched to the nearest GeoNames city (both-language names); none -> FAILED (first start: the
-     * user picks a city; a guess keeps its old city).
+     * D56 (amended 11-16): find the user's city. 1) system location (ACCESS_COARSE_LOCATION, asked through the window's
+     * RequestPermission dialog when not granted yet; last known + one fresh fix, 8 s), reverse-matched to the nearest city;
+     * 2) only when the permission is denied or no fix comes: IP geolocation (ipapi.co -> ipwho.is -> ipinfo.io, 8 s each),
+     * an IP owned by a cloud / data-centre / VPN provider is discarded; 3) nothing -> FAILED (first start: pick a city;
+     * a v0.1.5 guess keeps its old city). Settings [用我现在的位置] calls this again (and so re-asks the permission).
      */
     fun locate(why: String) {
         touch()
         locateJob?.cancel()
-        set { it.copy(locate = Locate.BUSY) }
-        log("LOCATE start ($why)")
-        locateJob = scope.launch {
-            var place: GeoIp.Place? = null
-            for (p in GeoIp.PROVIDERS) {
-                val r = runCatching {
-                    if (forceOffline || forceNoIp) error("debug offline")
-                    withTimeout(FETCH_TIMEOUT_MS) { withContext(io) { source.ipLocate(p) } }
-                }
-                place = r.getOrNull()?.let { GeoIp.parse(p, it) }
-                log("LOCATE ${p.name} -> ${place?.let { "${it.city} ${"%.3f".format(it.lat)},${"%.3f".format(it.lon)} tz=${it.tz}" } ?: ("failed " + (r.exceptionOrNull()?.message ?: "no place"))}")
-                if (place != null) break
-            }
-            val pl = place
-            if (pl == null) { onLocateFailed(why); return@launch }
-            val city = runCatching {
-                withTimeout(FETCH_TIMEOUT_MS) {
-                    withContext(io) {
-                        val near = if (pl.city.isNotBlank()) GeoIp.nearest(source.search(pl.city, false), pl) else null
-                        near?.let { c -> runCatching { OpenMeteo.mergeNames(c, source.names(c.id, true), true) }.getOrDefault(c) }
-                    }
-                }
-            }.getOrNull() ?: GeoIp.cityOf(pl)
-            set { it.copy(locate = Locate.IDLE) }
-            log("LOCATE ok ${city.nameEn}/${city.nameZh} ${"%.3f".format(city.lat)},${"%.3f".format(city.lon)} via ${pl.via} ($why)")
-            useLocated(city)
+        pendingWhy = why
+        if (locator.granted()) {
+            set { it.copy(locate = Locate.BUSY, askLocation = false, locPerm = LocPerm.GRANTED) }
+            log("LOCATE start ($why) permission granted")
+            locateJob = scope.launch { findCity(why, useSystem = true) }
+        } else {
+            set { it.copy(locate = Locate.BUSY, askLocation = true) }
+            log("LOCATE start ($why) asking ACCESS_COARSE_LOCATION")
+            // nobody answers (window closed / no dialog): fall back after a while, the dialog result still wins if it comes
+            locateJob = scope.launch { delay(ASK_TIMEOUT_MS); if (value.askLocation) { log("LOCATE no permission answer in ${ASK_TIMEOUT_MS / 1000} s"); onLocationPermission(false) } }
         }
+    }
+
+    private var pendingWhy = ""
+
+    /** The window's RequestPermission result (also the timeout above). Denied -> IP fallback -> picker; the app keeps working. */
+    fun onLocationPermission(granted: Boolean) {
+        if (!value.askLocation && value.locate != Locate.BUSY) return
+        val why = pendingWhy
+        set { it.copy(askLocation = false, locPerm = if (granted) LocPerm.GRANTED else LocPerm.DENIED) }
+        log("LOCATE permission ${if (granted) "granted" else "denied"} ($why)")
+        locateJob?.cancel()
+        locateJob = scope.launch { findCity(why, useSystem = granted) }
+    }
+
+    private suspend fun findCity(why: String, useSystem: Boolean) {
+        if (useSystem) {
+            val fix = runCatching { withTimeout(FETCH_TIMEOUT_MS) { locator.fix() } }.getOrNull()
+            log("LOCATE system -> ${fix?.let { "${"%.3f".format(it.lat)},${"%.3f".format(it.lon)} ${it.provider} age=${it.ageMs / 1000}s" } ?: "no fix"}")
+            if (fix != null) {
+                val city = cityNear(fix.lat, fix.lon)
+                set { it.copy(locate = Locate.IDLE) }
+                log("LOCATE ok ${city.nameEn}/${city.nameZh} via system ($why)")
+                useLocated(city)
+                return
+            }
+        }
+        var place: GeoIp.Place? = null
+        for (p in GeoIp.PROVIDERS) {
+            val r = runCatching {
+                if (forceOffline || forceNoIp) error("debug offline")
+                withTimeout(FETCH_TIMEOUT_MS) { withContext(io) { source.ipLocate(p) } }
+            }
+            place = r.getOrNull()?.let { GeoIp.parse(p, it) }
+            log("LOCATE ${p.name} -> ${place?.let { "${it.city} ${"%.3f".format(it.lat)},${"%.3f".format(it.lon)} tz=${it.tz} org=${it.org}" } ?: ("failed " + (r.exceptionOrNull()?.message ?: "no place"))}")
+            if (place != null && GeoIp.isDatacenter(place.org)) {
+                // the IP belongs to a cloud / data centre / VPN: its place is not the user's (Boardman, Oregon for San Jose)
+                log("LOCATE ${p.name} discarded: data-centre / VPN org \"${place.org}\"")
+                place = null
+                break
+            }
+            if (place != null) break
+        }
+        val pl = place
+        if (pl == null) { onLocateFailed(why); return }
+        val city = runCatching {
+            withTimeout(FETCH_TIMEOUT_MS) {
+                withContext(io) {
+                    val near = if (pl.city.isNotBlank()) GeoIp.nearest(source.search(pl.city, false), pl) else null
+                    near?.let { c -> runCatching { OpenMeteo.mergeNames(c, source.names(c.id, true), true) }.getOrDefault(c) }
+                }
+            }
+        }.getOrNull() ?: GeoIp.cityOf(pl)
+        set { it.copy(locate = Locate.IDLE) }
+        log("LOCATE ok ${city.nameEn}/${city.nameZh} ${"%.3f".format(city.lat)},${"%.3f".format(city.lon)} via ${pl.via} ($why)")
+        useLocated(city)
+    }
+
+    /** System fix -> the nearest named city: reverse geocoding name -> nearest GeoNames hit (<= 60 km); else a built-in city; else the coordinates. */
+    private suspend fun cityNear(lat: Double, lon: Double): City {
+        val probe = GeoIp.Place(lat, lon, "", "", "", "", GeoIp.Provider.IPAPI)
+        return runCatching {
+            withTimeout(FETCH_TIMEOUT_MS) {
+                withContext(io) {
+                    val name = GeoIp.parseReverse(source.reverse(lat, lon))
+                    val near = name?.let { GeoIp.nearest(source.search(it, false), probe) }
+                    near?.let { c -> runCatching { OpenMeteo.mergeNames(c, source.names(c.id, true), true) }.getOrDefault(c) }
+                }
+            }
+        }.getOrNull() ?: GeoIp.nearestBuiltIn(lat, lon) ?: GeoIp.cityAt(lat, lon)
     }
 
     private fun onLocateFailed(why: String) {
@@ -682,6 +749,6 @@ class WeatherFlow(
         val s = value
         return "phase=${s.phase.id} shown=${s.shown} ring=${"%.2f".format(ring.pos)} mode=${ring.mode} end=${ring.end} src=${s.slice.source} age=${s.slice.ageHours} " +
             "city=${s.city?.nameEn} cities=${s.cities.map { it.nameEn }} offline=${s.offline} fetching=${s.fetching} tag=${s.tag?.kind} search=${s.search.status} night=${s.night} " +
-            "locate=${s.locate} observed=${s.observed} skew=${skewMs / 1000}s local=${forecast?.let { ServerClock.localHm(now(), it.utcOffsetSec) }} firstHour=${s.slice.hours.first().time}"
+            "locate=${s.locate} perm=${s.locPerm} ask=${s.askLocation} observed=${s.observed} skew=${skewMs / 1000}s local=${forecast?.let { ServerClock.localHm(now(), it.utcOffsetSec) }} firstHour=${s.slice.hours.first().time}"
     }
 }

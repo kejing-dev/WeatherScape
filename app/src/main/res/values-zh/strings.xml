@@ -68,4 +68,7 @@
     <string name="locate_busy">正在定位…</string>
     <string name="locate_failed">没定到，去选城市</string>
     <string name="sound_level">%1$s %2$d%%</string>
+    <string name="no_city_hint_denied">没有位置权限，去「城市」页选一个。</string>
+    <string name="btn_open_settings">去设置</string>
+    <string name="locate_failed_pick">没定到，再试一次</string>
 </resources>

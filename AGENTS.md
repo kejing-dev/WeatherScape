@@ -26,6 +26,14 @@ sound pool, board-input template); weather data, ring, scene and pages are new.
   close -> a city made from the IP answer. All services failing -> no city, sample day, "pick your city" hint (never a
   time-zone guess). A v0.1.5 list that is one built-in city never viewed (the old time-zone pick) is located again and kept
   in the list. Settings [用我现在的位置 / Use my location] runs the same `WeatherFlow.locate` (full list -> the replace ask).
+- D56 amended (controller 11-16: this network's public IP is Amazon's, the emulator located to Boardman, OR): system
+  location first. ACCESS_COARSE_LOCATION is asked at start through the window's `ActivityResultContracts.RequestPermission`
+  (`WState.askLocation` -> `WeatherFlow.onLocationPermission`; nobody answers in 60 s = denied); `platform/Location.kt`
+  last known (< 30 min) or one fresh fix, 8 s, reverse-geocoded (BigDataCloud keyless) to the nearest GeoNames city.
+  Denied / no fix -> IP, but an IP whose org is a cloud / data-centre / VPN (`GeoIp.isDatacenter`: Amazon, Google Cloud,
+  Microsoft, Cloudflare, DigitalOcean, Akamai, Linode, OVH, Hetzner, Oracle, *hosting*, *VPN*, *data center*) is discarded
+  -> pick a city; the weather page then shows [去设置] (app details) when the permission was denied. [用我现在的位置] re-asks.
+  Evidence runs `pm grant` + `emu geo fix` (San Jose); the dialog is shot by hand after `pm revoke`.
 - Time: `WeatherFlow.now()` = device clock + the weather server's skew (HTTP Date of the forecast answer; without it
   `current.time - utc_offset_seconds`, `ServerClock`); the city's local hour, the 48 h cut, sunrise / sunset, moon age and
   the panel all come from the forecast (`utc_offset_seconds`, `hourly.time`, `daily`, `current.time`). Nothing reads

@@ -24,7 +24,7 @@ object GeoIp {
     val PROVIDERS = Provider.entries
 
     /** Where the IP says we are. */
-    data class Place(val lat: Double, val lon: Double, val city: String, val region: String, val country: String, val tz: String, val via: Provider)
+    data class Place(val lat: Double, val lon: Double, val city: String, val region: String, val country: String, val tz: String, val via: Provider, val org: String = "")
 
     /** One provider's answer -> a place, or null (error / rate limit / no coordinates). */
     fun parse(p: Provider, text: String): Place? = runCatching {
@@ -32,19 +32,31 @@ object GeoIp {
         when (p) {
             Provider.IPAPI -> {
                 if (o.optBoolean("error", false)) return null
-                Place(o.getDouble("latitude"), o.getDouble("longitude"), o.optString("city"), o.optString("region"), o.optString("country_name"), o.optString("timezone"), p)
+                Place(o.getDouble("latitude"), o.getDouble("longitude"), o.optString("city"), o.optString("region"), o.optString("country_name"), o.optString("timezone"), p, o.optString("org"))
             }
             Provider.IPWHO -> {
                 if (!o.optBoolean("success", false)) return null
                 Place(o.getDouble("latitude"), o.getDouble("longitude"), o.optString("city"), o.optString("region"), o.optString("country"),
-                    o.optJSONObject("timezone")?.optString("id") ?: "", p)
+                    o.optJSONObject("timezone")?.optString("id") ?: "", p,
+                    o.optJSONObject("connection")?.let { c -> listOf(c.optString("org"), c.optString("isp")).filter { it.isNotBlank() }.joinToString(" / ") } ?: "")
             }
             Provider.IPINFO -> {
                 val loc = o.getString("loc").split(",")
-                Place(loc[0].trim().toDouble(), loc[1].trim().toDouble(), o.optString("city"), o.optString("region"), o.optString("country"), o.optString("timezone"), p)
+                Place(loc[0].trim().toDouble(), loc[1].trim().toDouble(), o.optString("city"), o.optString("region"), o.optString("country"), o.optString("timezone"), p, o.optString("org"))
             }
         }
     }.getOrNull()?.takeIf { it.lat in -90.0..90.0 && it.lon in -180.0..180.0 && !(it.lat == 0.0 && it.lon == 0.0) }
+
+    /**
+     * D56 amended (controller 11-16: this network's public IP is Amazon's, the emulator located to Boardman, Oregon while
+     * the user sits in San Jose): an IP owned by a cloud / data-centre / VPN provider says nothing about where the user is.
+     */
+    private val DATACENTER = listOf(
+        "amazon", "aws", "google cloud", "microsoft", "azure", "cloudflare", "digitalocean", "digital ocean", "akamai", "linode",
+        "ovh", "hetzner", "oracle", "hosting", "vpn", "data center", "datacenter", "data centre",
+    )
+
+    fun isDatacenter(org: String): Boolean { val o = org.lowercase(); return DATACENTER.any { it in o } }
 
     /** Great-circle distance in km. */
     fun km(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -74,8 +86,39 @@ object GeoIp {
         return City(id, name, name, p.region, p.region, p.country, p.country, p.lat, p.lon, p.tz.ifBlank { "auto" })
     }
 
+    /** A city for system-location coordinates that matched no named place. */
+    fun cityAt(lat: Double, lon: Double, name: String = ""): City =
+        cityOf(Place(lat, lon, name, "", "", "", Provider.IPAPI))
+
+    /** The nearest built-in city within [maxKm], if any. */
+    fun nearestBuiltIn(lat: Double, lon: Double, maxKm: Double = 60.0): City? =
+        DefaultCities.ALL.map { it to km(lat, lon, it.lat, it.lon) }.filter { it.second <= maxKm }.minByOrNull { it.second }?.first
+
+    /** BigDataCloud keyless reverse geocoding (client-side endpoint) -> the place name around (lat, lon). */
+    fun reverseUrl(lat: Double, lon: Double) =
+        "https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%.4f&longitude=%.4f&localityLanguage=en".format(java.util.Locale.US, lat, lon)
+
+    fun parseReverse(text: String): String? = runCatching {
+        val o = JSONObject(text)
+        listOf("city", "locality", "principalSubdivision").map { o.optString(it) }.firstOrNull { it.isNotBlank() }
+    }.getOrNull()
+
     /** Built-in cities use -1..-24; IP-made ones live far below. */
     const val IP_ID_BASE = 1_000_000_000L
+}
+
+/** A system location fix (LocationManager), swapped for a fake in unit tests. */
+data class Fix(val lat: Double, val lon: Double, val provider: String, val ageMs: Long)
+
+/** System location (D56 amended: first choice; ACCESS_COARSE_LOCATION asked at start). */
+interface DeviceLocator {
+    fun granted(): Boolean
+    /** Last known (fresh enough) or one new fix; null when none. The caller bounds it with an 8 s timeout. */
+    suspend fun fix(): Fix?
+
+    companion object {
+        val NONE = object : DeviceLocator { override fun granted() = false; override suspend fun fix(): Fix? = null }
+    }
 }
 
 /**

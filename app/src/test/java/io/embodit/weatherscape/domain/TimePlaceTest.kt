@@ -50,7 +50,8 @@ class TimePlaceTest {
     private val sjZh = """{"id":5392171,"name":"圣何塞","latitude":37.33939,"longitude":-121.89496,"country":"美国","admin1":"加利福尼亚州"}"""
     private val ipwhoSj = """{"ip":"203.0.113.9","success":true,"city":"San Jose","region":"California","country":"United States","latitude":37.3382,"longitude":-121.8863,"timezone":{"id":"America/Los_Angeles"}}"""
 
-    private class Src(val forecast: String, val dateMs: Long?, val ip: Map<GeoIp.Provider, String>, val search: String, val zhNames: String) : WeatherSource {
+    private class Src(val forecast: String, val dateMs: Long?, val ip: Map<GeoIp.Provider, String>, val search: String, val zhNames: String, val reverseName: String = "San Jose") : WeatherSource {
+        override suspend fun reverse(lat: Double, lon: Double): String = """{"city":"$reverseName","locality":"$reverseName"}"""
         val asked = ArrayList<City>()
         val ipCalls = ArrayList<GeoIp.Provider>()
         override suspend fun forecast(c: City): String { asked += c; return forecast }
@@ -70,14 +71,22 @@ class TimePlaceTest {
 
     private class Run(val flow: WeatherFlow, val src: Src, val store: Mem, val scope: TestScope)
 
-    private fun run(zone: String, deviceMs: Long, dateMs: Long?, ip: Map<GeoIp.Provider, String>, saved: List<City> = emptyList()): Run {
+    private class Loc(val ok: Boolean, val f: Fix?) : DeviceLocator {
+        override fun granted() = ok
+        override suspend fun fix() = f
+    }
+
+    private fun run(zone: String, deviceMs: Long, dateMs: Long?, ip: Map<GeoIp.Provider, String>, saved: List<City> = emptyList(), locator: DeviceLocator = DeviceLocator.NONE, answer: Boolean? = null): Run {
         TimeZone.setDefault(TimeZone.getTimeZone(zone))
         val disp = StandardTestDispatcher(); val scope = TestScope(disp)
         val src = Src(sjForecast(), dateMs, ip, sjSearch, sjZh)
         val store = Mem(saved to saved.firstOrNull()?.id)
         var settings = Settings(seenHowTo = true)
-        val flow = WeatherFlow(scope, disp, { deviceMs }, { 1000L }, src, store, { settings }, { settings = it }, { true }, { false }, {}, { println(it) })
-        flow.start(); scope.advanceUntilIdle(); flow.sceneReady()
+        val flow = WeatherFlow(scope, disp, { deviceMs }, { 1000L }, src, store, { settings }, { settings = it }, { true }, { false }, {}, { println(it) }, locator)
+        flow.start()
+        // the window's permission dialog answers (null: nobody answers, the flow goes on after ASK_TIMEOUT_MS)
+        if (answer != null && flow.value.askLocation) flow.onLocationPermission(answer)
+        scope.advanceUntilIdle(); flow.sceneReady()
         return Run(flow, src, store, scope)
     }
 
@@ -185,5 +194,64 @@ class TimePlaceTest {
         // no Date header: current.time - offset
         assertEquals(Instant.parse("2026-11-17T07:15:00Z").toEpochMilli(), ServerClock.currentUtcMs("2026-11-16T23:15", sjOffset))
         assertEquals("23:15", ServerClock.observedHm("2026-11-16T23:15"))
+    }
+
+    // ---------------------------------------------------------------- D56 amended (controller 11-16: this network's IP is Amazon's)
+
+    private val ipAmazon = mapOf(
+        GeoIp.Provider.IPAPI to """{"city":"Boardman","region":"Oregon","country_name":"United States","latitude":45.8399,"longitude":-119.7006,"timezone":"America/Los_Angeles","org":"AMAZON-02"}""",
+        GeoIp.Provider.IPWHO to """{"success":true,"city":"Boardman","region":"Oregon","country":"United States","latitude":45.8399,"longitude":-119.7006,"timezone":{"id":"America/Los_Angeles"},"connection":{"org":"Amazon Technologies Inc.","isp":"Amazon.com, Inc."}}""",
+    )
+    private val sjFix = Fix(37.3352, -121.8811, "network", 5_000L)
+
+    @Test fun dataCentreOrgsAreRejected() {
+        for (org in listOf("AMAZON-02", "Amazon Technologies Inc.", "AS15169 Google Cloud", "Microsoft Corporation", "Cloudflare, Inc.", "DigitalOcean, LLC", "Akamai Technologies",
+            "Linode", "OVH SAS", "Hetzner Online GmbH", "Oracle Corporation", "M247 Hosting", "NordVPN", "Some Data Center Ltd")) assertTrue(org, GeoIp.isDatacenter(org))
+        for (org in listOf("Comcast Cable Communications", "AT&T Services", "China Telecom", "", "Sonic Telecom")) assertFalse(org, GeoIp.isDatacenter(org))
+        assertEquals("AMAZON-02", GeoIp.parse(GeoIp.Provider.IPAPI, ipAmazon[GeoIp.Provider.IPAPI]!!)!!.org)
+        assertTrue(GeoIp.parse(GeoIp.Provider.IPWHO, ipAmazon[GeoIp.Provider.IPWHO]!!)!!.org.contains("Amazon"))
+        // permission denied + an Amazon IP -> no city (pick one), never Boardman
+        val r = run("America/New_York", trueUtc, trueUtc, ipAmazon, locator = Loc(false, null), answer = false)
+        assertNull(r.flow.value.city)
+        assertTrue(r.flow.value.noCity)
+        assertEquals(Locate.FAILED, r.flow.value.locate)
+        assertEquals(LocPerm.DENIED, r.flow.value.locPerm)
+        assertTrue(r.src.asked.isEmpty())
+    }
+
+    @Test fun systemLocationWinsOverIp() {
+        // granted already: no dialog, the system fix (San Jose) wins, IP is never asked even though it says Boardman
+        val r = run("America/New_York", trueUtc, trueUtc, ipAmazon, locator = Loc(true, sjFix))
+        assertFalse(r.flow.value.askLocation)
+        assertEquals("San Jose", r.flow.value.city!!.nameEn)
+        assertTrue(r.src.ipCalls.isEmpty())
+        assertEquals(LocPerm.GRANTED, r.flow.value.locPerm)
+        // asked at start and granted in the dialog: same
+        val asked = run("Asia/Shanghai", trueUtc, trueUtc, ipAmazon, locator = Loc(false, sjFix), answer = true)
+        assertEquals(LocPerm.GRANTED, asked.flow.value.locPerm)
+        assertEquals("San Jose", asked.flow.value.city!!.nameEn)
+        assertTrue(asked.src.ipCalls.isEmpty())
+        // granted but no fix comes (no provider): IP fallback (a home ISP here) still finds the city
+        val nofix = run("Asia/Shanghai", trueUtc, trueUtc, ipOk, locator = Loc(true, null))
+        assertEquals("San Jose", nofix.flow.value.city!!.nameEn)
+        assertTrue(nofix.src.ipCalls.isNotEmpty())
+    }
+
+    @Test fun permissionDeniedFallsBackToIpThenThePicker() {
+        // denied + a home ISP IP -> the IP city
+        val home = run("America/New_York", trueUtc, trueUtc, ipOk, locator = Loc(false, sjFix), answer = false)
+        assertEquals("San Jose", home.flow.value.city!!.nameEn)
+        assertEquals(LocPerm.DENIED, home.flow.value.locPerm)
+        // denied + every IP service failing -> the picker, and the app still shows the sample day
+        val none = run("America/New_York", trueUtc, trueUtc, emptyMap(), locator = Loc(false, sjFix), answer = false)
+        assertNull(none.flow.value.city); assertTrue(none.flow.value.noCity); assertEquals(Source.SAMPLE, none.flow.value.slice.source)
+        // nobody answers the dialog (window closed): after the wait the flow goes on the same way
+        val silent = run("America/New_York", trueUtc, trueUtc, ipAmazon, locator = Loc(false, null))
+        assertTrue(silent.flow.value.noCity); assertFalse(silent.flow.value.askLocation)
+        // Settings [用我现在的位置] asks again
+        none.flow.locate("settings")
+        assertTrue(none.flow.value.askLocation)
+        none.flow.onLocationPermission(false); none.scope.advanceUntilIdle()
+        assertEquals(Locate.FAILED, none.flow.value.locate)
     }
 }
